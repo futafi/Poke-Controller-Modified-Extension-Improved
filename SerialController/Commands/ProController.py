@@ -195,7 +195,10 @@ class ProController:
         # コマンドが異なる場合のみ送る
         if self.flag_print and self.old_message != self.message:
             self.time0 = datetime.datetime.today()
-            ser.writeRow_wo_perf_counter(self.message, is_show=False)
+            if ser.is_pabotbase2():
+                ser.writeControllerState(self._pabotbase2_send_format(), is_show=False)
+            else:
+                ser.writeRow_wo_perf_counter(self.message, is_show=False)
 
             # 記録モードになっている場合のみ
             if flag_record:
@@ -216,7 +219,13 @@ class ProController:
 
     def end_sequence(self, ser: Sender, flag_record: bool):
         self.message = "0x0003 8 80 80 80 80"
-        ser.writeRow_wo_perf_counter(self.message, is_show=False)
+        if ser.is_pabotbase2():
+            self.bits_16 = 0
+            self.hat_status = 0
+            self.stick_status_new = [128, 128, 128, 128]
+            ser.writeControllerState(self._pabotbase2_send_format(), is_show=False)
+        else:
+            ser.writeRow_wo_perf_counter(self.message, is_show=False)
         if flag_record:
             self.record_message(True)
             self.f.close()
@@ -262,3 +271,18 @@ class ProController:
         pygame.quit()
         self._logger.info("Inactivate Pro Controller")
         print("*****Inactivate Pro Controller*****")
+
+    def _pabotbase2_send_format(self):
+        class ControllerState:
+            pass
+
+        state = ControllerState()
+        state.format = {
+            "btn": self.bits_16 >> 2,
+            "hat": self.hat_dict[self.hat_status],
+            "lx": self.stick_status_new[0],
+            "ly": self.stick_status_new[1],
+            "rx": self.stick_status_new[2],
+            "ry": self.stick_status_new[3],
+        }
+        return state

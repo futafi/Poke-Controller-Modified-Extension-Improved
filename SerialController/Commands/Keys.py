@@ -463,7 +463,12 @@ class KeyPress:
         for btn in self.holdButton:
             if btn not in btns:
                 btns.append(btn)
-        if self.serial_data_format_name == "3DS Controller":
+        if self.serial_data_format_name == "PABotBase2":
+            self.format.setButton([btn for btn in btns if type(btn) is Button])
+            self.format.setHat([btn for btn in btns if type(btn) is Hat])
+            self.format.setAnyDirection([btn for btn in btns if type(btn) is Direction])
+            self.ser.writeControllerState(self.format)
+        elif self.serial_data_format_name == "3DS Controller":
             self.format.setButton(
                 [btn for btn in btns if type(btn) is Button], convert=conversion_3ds_controller_button
             )
@@ -500,7 +505,13 @@ class KeyPress:
                 tilts.append(tilting)
         # self._logger.debug(tilts)
 
-        if self.serial_data_format_name == "3DS Controller":
+        if self.serial_data_format_name == "PABotBase2":
+            self.format.unsetButton([btn for btn in btns if type(btn) is Button])
+            if unset_hat:
+                self.format.unsetHat()
+            self.format.unsetDirection(tilts)
+            self.ser.writeControllerState(self.format)
+        elif self.serial_data_format_name == "3DS Controller":
             self.format.unsetButton(
                 [btn for btn in btns if type(btn) is Button], convert=conversion_3ds_controller_button
             )
@@ -564,7 +575,12 @@ class KeyPress:
         self.inputEnd(btns, unset_hat=True, unset_Touchscreen=True)
 
     def end(self):
-        if self.serial_data_format_name in ["Qingpi", "3DS Controller"]:
+        if self.serial_data_format_name == "PABotBase2":
+            self.format.resetAllButtons()
+            self.format.unsetHat()
+            self.format.resetAllDirections()
+            self.ser.writeControllerState(self.format)
+        elif self.serial_data_format_name in ["Qingpi", "3DS Controller"]:
             pass
         else:
             self.ser.writeRow("end")
