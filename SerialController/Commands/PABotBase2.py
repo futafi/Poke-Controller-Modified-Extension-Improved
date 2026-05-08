@@ -51,6 +51,7 @@ def controller_mode_from_name(mode_name: str) -> ControllerMode:
 
 PABB2_CONNECTION_MAGIC_NUMBER = 0x81
 PABB2_CONNECTION_PROTOCOL_VERSION = 2026041102
+PABB2_CONNECTION_RESET_SESSION_ID = 0xFFFFFFFF
 
 PABB2_CONNECTION_RETRANSMIT_FLAG = 0x80
 PABB2_CONNECTION_OPCODE_MASK = 0x7F
@@ -97,6 +98,7 @@ PACKET_DATA_HEADER_SIZE = 6
 CRC_SIZE = 4
 DEFAULT_PACKET_SIZE = 24
 DEFAULT_REMOTE_SLOTS = 1
+CONNECT_BAUD_RATES = (921600, 115200)
 PABB2_PacketSender_RETRANSMIT_COUNTER = 2
 PABOTBASE2_STATE_HOLD_MS = 65535
 
@@ -161,31 +163,44 @@ class PABotBase2Connection:
     def connect(self, timeout: float = 5.0) -> None:
         deadline = time.monotonic() + timeout
         last_error: Exception | None = None
-        for baudrate in (921600, 115200):
-            if time.monotonic() >= deadline:
-                break
+        while time.monotonic() < deadline:
             try:
-                self.serial.baudrate = baudrate
+                self.serial.baudrate = 921600
                 self._reset_input_buffer()
-                self._reset(random_session_id=True, timeout=0.5)
-                self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_VERSION, timeout=0.5)
-                if self.remote_connection_protocol_major != PABB2_CONNECTION_PROTOCOL_VERSION // 100:
-                    raise PABotBase2Error(
-                        f"Incompatible PABotBase2 connection protocol: {self.remote_connection_protocol}"
-                    )
-                self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_PACKET_SIZE, timeout=0.5)
-                self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_BUFFER_SLOTS, timeout=0.5)
-                self._connect_device()
-                self._set_controller_mode(self.controller_mode)
-                self.connected = True
+                self._reset(random_session_id=False, timeout=0.1)
+                self._finish_connect()
                 return
             except Exception as e:
                 last_error = e
                 self._reset_runtime_state()
+            for baudrate in CONNECT_BAUD_RATES:
+                if time.monotonic() >= deadline:
+                    break
+                try:
+                    self.serial.baudrate = baudrate
+                    self._reset_input_buffer()
+                    self._reset(random_session_id=True, timeout=0.1)
+                    self._finish_connect()
+                    return
+                except Exception as e:
+                    last_error = e
+                    self._reset_runtime_state()
 
         if last_error is not None:
             raise PABotBase2Error(f"Unable to connect to PABotBase2 device: {last_error}") from last_error
         raise PABotBase2Error("Unable to connect to PABotBase2 device.")
+
+    def _finish_connect(self) -> None:
+        self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_VERSION, timeout=0.5)
+        if self.remote_connection_protocol_major != PABB2_CONNECTION_PROTOCOL_VERSION // 100:
+            raise PABotBase2Error(
+                f"Incompatible PABotBase2 connection protocol: {self.remote_connection_protocol}"
+            )
+        self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_PACKET_SIZE, timeout=0.5)
+        self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_BUFFER_SLOTS, timeout=0.5)
+        self._connect_device()
+        self._set_controller_mode(self.controller_mode)
+        self.connected = True
 
     @property
     def remote_connection_protocol(self) -> int:
@@ -241,8 +256,8 @@ class PABotBase2Connection:
         self._reset_runtime_state()
         if random_session_id:
             self.session_id = random.getrandbits(32)
-            if self.session_id == 0xFFFFFFFF:
-                self.session_id = 0xFFFFFFFE
+            if self.session_id == PABB2_CONNECTION_RESET_SESSION_ID:
+                self.session_id = PABB2_CONNECTION_RESET_SESSION_ID - 1
             body = struct.pack(
                 "<BBBBI",
                 PABB2_CONNECTION_MAGIC_NUMBER,
@@ -251,9 +266,9 @@ class PABotBase2Connection:
                 PABB2_CONNECTION_OPCODE_ASK_RESET,
                 self.session_id,
             )
-            self._send_packet_body(body, seed=0xFFFFFFFF)
+            self._send_packet_body(body, seed=PABB2_CONNECTION_RESET_SESSION_ID)
         else:
-            self.session_id = 0xFFFFFFFF
+            self.session_id = PABB2_CONNECTION_RESET_SESSION_ID
             body = struct.pack(
                 "<BBBB",
                 PABB2_CONNECTION_MAGIC_NUMBER,
@@ -367,7 +382,7 @@ class PABotBase2Connection:
     def _process_packet(self, packet: bytes) -> None:
         expected = struct.unpack_from("<I", packet, len(packet) - CRC_SIZE)[0]
         actual = pabb_crc32(self.session_id, packet[:-CRC_SIZE])
-        if expected != actual:
+        if expected != actual and not self._matches_reset_handshake_crc(expected, packet):
             self.bad_crc_packets += 1
             self._logger.warning(
                 "Discarding PABotBase2 packet with CRC mismatch: "
@@ -414,6 +429,16 @@ class PABotBase2Connection:
             raise PABotBase2Error(f"PABotBase2 device reported stream error opcode: 0x{opcode:02x}")
         if opcode == PABB2_CONNECTION_OPCODE_UNKNOWN_OPCODE:
             raise PABotBase2Error(f"PABotBase2 device reported unknown opcode: {packet[PACKET_HEADER_SIZE]}")
+
+    def _matches_reset_handshake_crc(self, expected: int, packet: bytes) -> bool:
+        if packet[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_RET_RESET:
+            return False
+        pending = self.pending_packets.get(packet[1])
+        if pending is None:
+            return False
+        if pending[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_ASK_RESET:
+            return False
+        return expected == pabb_crc32(PABB2_CONNECTION_RESET_SESSION_ID, packet[:-CRC_SIZE])
 
     def _process_incoming_stream_packet(self, seq: int, packet: bytes) -> None:
         stream_offset = struct.unpack_from("<H", packet, PACKET_HEADER_SIZE)[0]
