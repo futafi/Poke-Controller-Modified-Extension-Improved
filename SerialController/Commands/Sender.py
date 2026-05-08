@@ -11,7 +11,12 @@ import platform
 import serial
 from logging import getLogger, DEBUG, NullHandler
 
-from Commands.PABotBase2 import ControllerMode, PABotBase2Connection, PABotBase2Error
+from Commands.PABotBase2 import (
+    PABOTBASE2_CONTROLLER_MODE_NAMES,
+    PABotBase2Connection,
+    PABotBase2Error,
+    controller_mode_from_name,
+)
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -36,6 +41,7 @@ class Sender:
         self.time_bef = time.perf_counter()
         self.time_aft = time.perf_counter()
         self.serial_data_format_name = "Default"
+        self.pabotbase2_controller_mode_name = PABOTBASE2_CONTROLLER_MODE_NAMES[0]
         self.pabotbase2 = None
         self.Buttons = [
             "Stick.RIGHT",
@@ -59,6 +65,10 @@ class Sender:
 
     def set_serial_data_format(self, serial_data_format_name: str):
         self.serial_data_format_name = serial_data_format_name
+
+    def set_pabotbase2_controller_mode(self, mode_name: str):
+        controller_mode_from_name(mode_name)
+        self.pabotbase2_controller_mode_name = mode_name
 
     def is_pabotbase2(self):
         return self.serial_data_format_name.startswith("PABotBase2")
@@ -111,13 +121,18 @@ class Sender:
 
     def _post_open_serial(self):
         if self.is_pabotbase2():
-            self.pabotbase2 = PABotBase2Connection(self.ser, ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER)
+            self.pabotbase2 = PABotBase2Connection(
+                self.ser,
+                controller_mode_from_name(self.pabotbase2_controller_mode_name),
+            )
             self.pabotbase2.connect()
             print(
                 "PABotBase2 connected: "
                 + self.pabotbase2.device_name
                 + " firmware "
                 + str(self.pabotbase2.device_firmware_version)
+                + " as "
+                + self.pabotbase2_controller_mode_name
             )
         return True
 

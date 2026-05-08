@@ -21,7 +21,9 @@ from Commands.PABotBase2 import (  # noqa: E402
     PACKET_DATA_HEADER_SIZE,
     PACKET_HEADER_SIZE,
     ControllerMode,
+    PABotBase2Error,
     PABotBase2Connection,
+    PABOTBASE2_CONTROLLER_MODE_BY_NAME,
     PABB2_CONNECTION_MAGIC_NUMBER,
     PABB2_CONNECTION_OPCODE_ASK_RESET,
     PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA,
@@ -166,14 +168,14 @@ class FakeSerial:
 
 
 class Format:
-    def __init__(self):
+    def __init__(self, btn=(1 << 2) | (1 << 7), hat=0, lx=255, ly=128, rx=128, ry=0):
         self.format = {
-            "btn": (1 << 2) | (1 << 7),
-            "hat": 0,
-            "lx": 255,
-            "ly": 128,
-            "rx": 128,
-            "ry": 0,
+            "btn": btn,
+            "hat": hat,
+            "lx": lx,
+            "ly": ly,
+            "rx": rx,
+            "ry": ry,
         }
 
 
@@ -198,6 +200,52 @@ class PABotBase2Tests(unittest.TestCase):
                 for packet in serial.written
             )
         )
+
+    def test_connect_uses_selected_controller_mode(self):
+        for mode_name, mode in PABOTBASE2_CONTROLLER_MODE_BY_NAME.items():
+            with self.subTest(mode=mode_name):
+                serial = FakeSerial()
+                connection = PABotBase2Connection(serial, mode)
+
+                connection.connect(timeout=1.0)
+
+                self.assertEqual(serial.controller_mode, int(mode))
+
+    def test_sender_passes_selected_pabotbase2_controller_mode(self):
+        class FalseVar:
+            def get(self):
+                return False
+
+        sender = Sender(FalseVar())
+        sender.set_serial_data_format("PABotBase2")
+        sender.set_pabotbase2_controller_mode("Wireless Left Joy-Con")
+        sender.ser = FakeSerial()
+
+        sender._post_open_serial()
+
+        self.assertEqual(sender.ser.controller_mode, int(ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON))
+
+    def test_joycon_modes_fail_fast_on_unsupported_inputs(self):
+        left = PABotBase2Connection(
+            FakeSerial(),
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
+        )
+        right = PABotBase2Connection(
+            FakeSerial(),
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
+        )
+
+        left._build_oem_controller_buttons(Format(btn=1 << 4, hat=0, lx=255, ly=128, rx=128, ry=128), 100)
+        right._build_oem_controller_buttons(Format(btn=1 << 2, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
+
+        with self.assertRaisesRegex(PABotBase2Error, "Y"):
+            left._build_oem_controller_buttons(Format(btn=1 << 0, hat=8, lx=128, ly=128, rx=128, ry=128), 100)
+        with self.assertRaisesRegex(PABotBase2Error, "Right stick"):
+            left._build_oem_controller_buttons(Format(btn=0, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
+        with self.assertRaisesRegex(PABotBase2Error, "D-pad/Hat"):
+            right._build_oem_controller_buttons(Format(btn=0, hat=0, lx=128, ly=128, rx=128, ry=128), 100)
+        with self.assertRaisesRegex(PABotBase2Error, "Left stick"):
+            right._build_oem_controller_buttons(Format(btn=0, hat=8, lx=255, ly=128, rx=128, ry=128), 100)
 
     def test_sender_converts_legacy_row_to_pabotbase2_state(self):
         class FalseVar:

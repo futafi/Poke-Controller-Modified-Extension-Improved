@@ -262,6 +262,18 @@ class PokeControllerApp:
         self.is_show_serial = tk.BooleanVar()  # modified
         self.show_serial_checkbox.configure(text="Show Serial", variable=self.is_show_serial)
         self.show_serial_checkbox.grid(column="2", padx="5", pady="5", row="0", sticky="ew")
+        self.pabotbase2_controller_mode_label = ttk.Label(self.serial_data_lf)
+        self.pabotbase2_controller_mode_label.configure(anchor="center", text="PABotBase2 Mode: ")
+        self.pabotbase2_controller_mode_label.grid(column="0", padx="5", pady="5", row="1", sticky="ew")
+        self.pabotbase2_controller_mode_cb = ttk.Combobox(self.serial_data_lf)
+        self.pabotbase2_controller_mode = tk.StringVar(value=Sender.PABOTBASE2_CONTROLLER_MODE_NAMES[0])
+        self.pabotbase2_controller_mode_cb.configure(
+            state="readonly",
+            textvariable=self.pabotbase2_controller_mode,
+            values=Sender.PABOTBASE2_CONTROLLER_MODE_NAMES,
+        )
+        self.pabotbase2_controller_mode_cb.grid(column="1", padx="5", pady="5", row="1", sticky="ew")
+        self.pabotbase2_controller_mode_cb.bind("<<ComboboxSelected>>", self.set_pabotbase2_controller_mode)
         self.serial_data_lf.configure(height="200", text="Data", width="200")
         self.serial_data_lf.grid(column="0", padx="5", row="1", sticky="ew")
         # self.serial_f.configure(height='200', width='200')    # removed
@@ -921,6 +933,7 @@ class PokeControllerApp:
         self.baud_rate.set(self.settings.baud_rate.get())
         self.camera_id.set(self.settings.camera_id.get())
         self.serial_data_format_name.set(self.settings.serial_data_format_name.get())
+        self.pabotbase2_controller_mode.set(self.settings.pabotbase2_controller_mode.get())
         self.touchscreen_start_x = self.settings.touchscreen_start_x
         self.touchscreen_start_y = self.settings.touchscreen_start_y
         self.touchscreen_end_x = self.settings.touchscreen_end_x
@@ -1051,6 +1064,7 @@ class PokeControllerApp:
 
         self.ser = Sender.Sender(self.is_show_serial)
         self.ser.set_serial_data_format(self.serial_data_format_name.get())
+        self.ser.set_pabotbase2_controller_mode(self.pabotbase2_controller_mode.get())
         self.activateSerial()
         self.activateKeyboard()
         self.preview = CaptureArea(
@@ -1319,8 +1333,10 @@ class PokeControllerApp:
     def set_serial_data_format(self, event=None):
         KeyPress.serial_data_format_name = self.serial_data_format_name.get()
         self.ser.set_serial_data_format(self.serial_data_format_name.get())
+        self.ser.set_pabotbase2_controller_mode(self.pabotbase2_controller_mode.get())
         self.keys_software_controller.init_hat()
         self.preview.changeRightMouseMode(self.serial_data_format_name.get())
+        self._update_pabotbase2_controller_mode_state()
 
         if self.serial_data_format_name.get() == "3DS Controller":
             print("ボーレートを強制的に115200に変更します。")
@@ -1332,6 +1348,15 @@ class PokeControllerApp:
             print("ボーレートを強制的に9600に変更します。")
             self.baud_rate.set("9600")
         self.activateSerial()
+
+    def set_pabotbase2_controller_mode(self, event=None):
+        self.ser.set_pabotbase2_controller_mode(self.pabotbase2_controller_mode.get())
+        self._update_pabotbase2_controller_mode_state()
+        self.activateSerial()
+
+    def _update_pabotbase2_controller_mode_state(self):
+        state = "readonly" if self.serial_data_format_name.get() == "PABotBase2" else "disabled"
+        self.pabotbase2_controller_mode_cb.configure(state=state)
 
     def applyFps(self, event=None):
         print("changed FPS to: " + self.fps.get() + " [fps]")
@@ -1373,6 +1398,7 @@ class PokeControllerApp:
                 self.keyPress = KeyPress(self.ser)
                 self.settings.com_port.set(self.com_port.get())
                 self.settings.baud_rate.set(self.baud_rate.get())
+                self.settings.pabotbase2_controller_mode.set(self.pabotbase2_controller_mode.get())
                 self.settings.save()
 
     def inactivateSerial(self):
@@ -1883,6 +1909,7 @@ class PokeControllerApp:
             self.settings.baud_rate.set(self.baud_rate.get())
             self.settings.camera_id.set(self.camera_id.get())
             self.settings.serial_data_format_name.set(self.serial_data_format_name.get())
+            self.settings.pabotbase2_controller_mode.set(self.pabotbase2_controller_mode.get())
             self.settings.touchscreen_start_x = self.preview.touchscreen_start_x
             self.settings.touchscreen_start_y = self.preview.touchscreen_start_y
             self.settings.touchscreen_end_x = self.preview.touchscreen_end_x

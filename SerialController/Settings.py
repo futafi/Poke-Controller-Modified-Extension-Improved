@@ -46,6 +46,12 @@ class GuiSettings:
         except Exception:
             self.serial_data_format_name = tk.StringVar(value="Default")
         try:
+            self.pabotbase2_controller_mode = tk.StringVar(
+                value=self.setting["General Setting"]["pabotbase2_controller_mode"]
+            )
+        except Exception:
+            self.pabotbase2_controller_mode = tk.StringVar(value="Wireless Pro Controller")
+        try:
             self.touchscreen_start_x = int(self.setting["General Setting"]["touchscreen_start_x"])
         except Exception:
             self.touchscreen_start_x = 1
@@ -147,6 +153,7 @@ class GuiSettings:
             "is_show_serial": False,
             "is_use_keyboard": True,
             "serial_data_format_name": "Default",
+            "pabotbase2_controller_mode": "Wireless Pro Controller",
             "touchscreen_start_x": 1,
             "touchscreen_start_y": 1,
             "touchscreen_end_x": 320,
@@ -252,6 +259,7 @@ class GuiSettings:
             "is_show_serial": self.is_show_serial.get(),
             "is_use_keyboard": self.is_use_keyboard.get(),
             "serial_data_format_name": self.serial_data_format_name.get(),
+            "pabotbase2_controller_mode": self.pabotbase2_controller_mode.get(),
             "touchscreen_start_x": self.touchscreen_start_x,
             "touchscreen_start_y": self.touchscreen_start_y,
             "touchscreen_end_x": self.touchscreen_end_x,

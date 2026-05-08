@@ -25,6 +25,30 @@ class ControllerMode(IntEnum):
     NINTENDO_SWITCH_WIRED_RIGHT_JOYCON = 0x1102
 
 
+PABOTBASE2_CONTROLLER_MODE_NAMES = (
+    "Wireless Pro Controller",
+    "Wireless Left Joy-Con",
+    "Wireless Right Joy-Con",
+)
+
+PABOTBASE2_CONTROLLER_MODE_BY_NAME = {
+    "Wireless Pro Controller": ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER,
+    "Wireless Left Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
+    "Wireless Right Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
+}
+
+PABOTBASE2_CONTROLLER_MODE_NAME_BY_MODE = {
+    mode: name for name, mode in PABOTBASE2_CONTROLLER_MODE_BY_NAME.items()
+}
+
+
+def controller_mode_from_name(mode_name: str) -> ControllerMode:
+    try:
+        return PABOTBASE2_CONTROLLER_MODE_BY_NAME[mode_name]
+    except KeyError as e:
+        raise PABotBase2Error(f"Unsupported PABotBase2 controller mode: {mode_name}") from e
+
+
 PABB2_CONNECTION_MAGIC_NUMBER = 0x81
 PABB2_CONNECTION_PROTOCOL_VERSION = 2026041102
 
@@ -468,9 +492,16 @@ class PABotBase2Connection:
 
     def _build_oem_controller_buttons(self, send_format: Any, milliseconds: int) -> bytes:
         fmt = send_format.format
-        button3, button4, button5 = self._encode_buttons(int(fmt["btn"]), int(fmt["hat"]))
-        left = self._pack_oem_stick(int(fmt["lx"]), int(fmt["ly"]))
-        right = self._pack_oem_stick(int(fmt["rx"]), int(fmt["ry"]))
+        buttons = int(fmt["btn"])
+        hat = int(fmt["hat"])
+        lx = int(fmt["lx"])
+        ly = int(fmt["ly"])
+        rx = int(fmt["rx"])
+        ry = int(fmt["ry"])
+        self._validate_controller_state(buttons, hat, lx, ly, rx, ry)
+        button3, button4, button5 = self._encode_buttons(buttons, hat)
+        left = self._pack_oem_stick(lx, ly)
+        right = self._pack_oem_stick(rx, ry)
         buttons = bytes([button3, button4, button5]) + left + right + bytes([0])
         return struct.pack(
             "<HBBH",
@@ -479,6 +510,48 @@ class PABotBase2Connection:
             0,
             milliseconds & 0xFFFF,
         ) + buttons
+
+    def _validate_controller_state(self, buttons: int, hat: int, lx: int, ly: int, rx: int, ry: int) -> None:
+        if self.controller_mode == ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON:
+            self._raise_on_unsupported_buttons(
+                buttons,
+                unsupported_bits={
+                    0: "Y",
+                    1: "B",
+                    2: "A",
+                    3: "X",
+                    5: "R",
+                    7: "ZR",
+                    9: "PLUS",
+                    11: "RCLICK",
+                    12: "HOME",
+                },
+            )
+            if (rx, ry) != (128, 128):
+                raise PABotBase2Error("Right stick input is unsupported in Wireless Left Joy-Con mode.")
+            return
+
+        if self.controller_mode == ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON:
+            self._raise_on_unsupported_buttons(
+                buttons,
+                unsupported_bits={
+                    4: "L",
+                    6: "ZL",
+                    8: "MINUS",
+                    10: "LCLICK",
+                    13: "CAPTURE",
+                },
+            )
+            if hat != 8:
+                raise PABotBase2Error("D-pad/Hat input is unsupported in Wireless Right Joy-Con mode.")
+            if (lx, ly) != (128, 128):
+                raise PABotBase2Error("Left stick input is unsupported in Wireless Right Joy-Con mode.")
+
+    @staticmethod
+    def _raise_on_unsupported_buttons(buttons: int, unsupported_bits: dict[int, str]) -> None:
+        pressed = [name for bit, name in unsupported_bits.items() if buttons & (1 << bit)]
+        if pressed:
+            raise PABotBase2Error(f"Unsupported button(s) for selected PABotBase2 controller mode: {', '.join(pressed)}")
 
     @staticmethod
     def _encode_buttons(buttons: int, hat: int) -> tuple[int, int, int]:
