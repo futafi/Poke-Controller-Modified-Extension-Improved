@@ -151,6 +151,7 @@ class PABotBase2Connection:
         self.device_firmware_version = 0
         self.device_protocol = 0
         self.device_id = 0
+        self.bad_crc_packets = 0
 
         self._logger = getLogger(__name__)
         self._logger.addHandler(NullHandler())
@@ -367,7 +368,17 @@ class PABotBase2Connection:
         expected = struct.unpack_from("<I", packet, len(packet) - CRC_SIZE)[0]
         actual = pabb_crc32(self.session_id, packet[:-CRC_SIZE])
         if expected != actual:
-            raise PABotBase2Error("PABotBase2 packet CRC mismatch.")
+            self.bad_crc_packets += 1
+            self._logger.warning(
+                "Discarding PABotBase2 packet with CRC mismatch: "
+                "seq=%d opcode=0x%02x bytes=%d expected=0x%08x actual=0x%08x",
+                packet[1],
+                packet[3] if len(packet) > 3 else 0,
+                len(packet),
+                expected,
+                actual,
+            )
+            return
 
         _, seq, _, raw_opcode = struct.unpack_from("<BBBB", packet)
         opcode = raw_opcode & PABB2_CONNECTION_OPCODE_MASK

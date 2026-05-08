@@ -63,6 +63,7 @@ class FakeSerial:
         self.device_seq = 0
         self.device_stream_offset = 0
         self.controller_mode = 0
+        self.inject_bad_crc_before_reset_ack = False
 
     @property
     def in_waiting(self):
@@ -87,6 +88,9 @@ class FakeSerial:
         seq = packet[1]
         if opcode == PABB2_CONNECTION_OPCODE_ASK_RESET:
             self.session_id = struct.unpack_from("<I", packet, PACKET_HEADER_SIZE)[0]
+            if self.inject_bad_crc_before_reset_ack:
+                self.inject_bad_crc_before_reset_ack = False
+                self._send_bad_crc_packet(seq, PABB2_CONNECTION_OPCODE_RET_RESET)
             self._send_packet(seq, PABB2_CONNECTION_OPCODE_RET_RESET)
         elif opcode == PABB2_CONNECTION_OPCODE_ASK_VERSION:
             self._send_packet(seq, PABB2_CONNECTION_OPCODE_RET_VERSION, struct.pack("<I", 2026041102))
@@ -112,6 +116,18 @@ class FakeSerial:
             opcode,
         ) + payload
         self.incoming.extend(packet_with_crc(self.session_id, body))
+
+    def _send_bad_crc_packet(self, seq, opcode, payload=b""):
+        body = struct.pack(
+            "<BBBB",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            seq,
+            PACKET_HEADER_SIZE + len(payload) + CRC_SIZE,
+            opcode,
+        ) + payload
+        packet = bytearray(packet_with_crc(self.session_id, body))
+        packet[-1] ^= 0x01
+        self.incoming.extend(packet)
 
     def _send_stream_message(self, message):
         body = struct.pack(
@@ -200,6 +216,16 @@ class PABotBase2Tests(unittest.TestCase):
                 for packet in serial.written
             )
         )
+
+    def test_connect_discards_bad_crc_packet_before_valid_ack(self):
+        serial = FakeSerial()
+        serial.inject_bad_crc_before_reset_ack = True
+        connection = PABotBase2Connection(serial)
+
+        connection.connect(timeout=1.0)
+
+        self.assertTrue(connection.connected)
+        self.assertEqual(connection.bad_crc_packets, 1)
 
     def test_connect_uses_selected_controller_mode(self):
         for mode_name, mode in PABOTBASE2_CONTROLLER_MODE_BY_NAME.items():
