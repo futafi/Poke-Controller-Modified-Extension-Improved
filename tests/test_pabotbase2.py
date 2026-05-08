@@ -50,6 +50,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     pabb_crc32,
     packet_with_crc,
 )
+from Commands.Keys import Button  # noqa: E402
 from Commands.Sender import Sender  # noqa: E402
 
 
@@ -307,6 +308,39 @@ class PABotBase2Tests(unittest.TestCase):
             right._build_oem_controller_buttons(Format(btn=0, hat=0, lx=128, ly=128, rx=128, ry=128), 100)
         with self.assertRaisesRegex(PABotBase2Error, "Left stick"):
             right._build_oem_controller_buttons(Format(btn=0, hat=8, lx=255, ly=128, rx=128, ry=128), 100)
+
+    def test_joycon_sl_sr_buttons_encode_like_pokemon_automation(self):
+        button3, _, button5 = PABotBase2Connection._encode_buttons(
+            int(Button.LEFT_SL | Button.LEFT_SR | Button.RIGHT_SL | Button.RIGHT_SR),
+            8,
+        )
+
+        self.assertEqual(button3 & 0x30, 0x30)
+        self.assertEqual(button5 & 0x30, 0x30)
+
+    def test_joycon_modes_accept_matching_sl_sr_and_stick(self):
+        left = PABotBase2Connection(
+            FakeSerial(),
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
+        )
+        right = PABotBase2Connection(
+            FakeSerial(),
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
+        )
+
+        left._build_oem_controller_buttons(
+            Format(btn=int(Button.LEFT_SL | Button.LEFT_SR), hat=8, lx=255, ly=128, rx=128, ry=128),
+            100,
+        )
+        right._build_oem_controller_buttons(
+            Format(btn=int(Button.RIGHT_SL | Button.RIGHT_SR), hat=8, lx=128, ly=128, rx=255, ry=128),
+            100,
+        )
+
+        with self.assertRaisesRegex(PABotBase2Error, "RIGHT_SL"):
+            left._build_oem_controller_buttons(Format(btn=int(Button.RIGHT_SL), hat=8), 100)
+        with self.assertRaisesRegex(PABotBase2Error, "LEFT_SL"):
+            right._build_oem_controller_buttons(Format(btn=int(Button.LEFT_SL), hat=8), 100)
 
     def test_sender_converts_legacy_row_to_pabotbase2_state(self):
         class FalseVar:

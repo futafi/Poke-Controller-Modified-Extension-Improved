@@ -675,6 +675,17 @@ class PokeControllerApp:
         self.softcon_capture_button = tk.Button(self.softcon_left_frame)
         self.softcon_capture_button.configure(text="CAP", width=5, bg="#343434", fg="#FFFFFF")
         self.softcon_capture_button.grid(column=2, padx=2, pady=2, row=4)
+        self.softcon_left_sl_button = tk.Button(self.softcon_left_frame)
+        self.softcon_left_sl_button.configure(text="SL", width=5, bg="#343434", fg="#FFFFFF")
+        self.softcon_left_sl_button.grid(column=0, padx=2, pady=2, row=5)
+        self.softcon_left_sr_button = tk.Button(self.softcon_left_frame)
+        self.softcon_left_sr_button.configure(text="SR", width=5, bg="#343434", fg="#FFFFFF")
+        self.softcon_left_sr_button.grid(column=2, padx=2, pady=2, row=5)
+        self.softcon_left_stick = tk.Canvas(
+            self.softcon_left_frame, width=72, height=72, bg="#56CCF2", highlightthickness=0
+        )
+        self.softcon_left_stick.grid(column=0, columnspan=3, padx=2, pady=2, row=6)
+        self._draw_softcon_stick(self.softcon_left_stick)
         self.softcon_left_frame.grid(column=0, ipadx=3, ipady=3, row=0, sticky="nsew")
         self.softcon_left_frame.grid_anchor("center")
         self.softcon_right_frame = tk.Frame(self.softcon_frame, bg="#E9514E")
@@ -706,6 +717,17 @@ class PokeControllerApp:
         self.softcon_home_button = tk.Button(self.softcon_right_frame)
         self.softcon_home_button.configure(text="HOME", width=5, bg="#343434", fg="#FFFFFF")
         self.softcon_home_button.grid(column=0, padx=2, pady=2, row=4)
+        self.softcon_right_sl_button = tk.Button(self.softcon_right_frame)
+        self.softcon_right_sl_button.configure(text="SL", width=5, bg="#343434", fg="#FFFFFF")
+        self.softcon_right_sl_button.grid(column=0, padx=2, pady=2, row=5)
+        self.softcon_right_sr_button = tk.Button(self.softcon_right_frame)
+        self.softcon_right_sr_button.configure(text="SR", width=5, bg="#343434", fg="#FFFFFF")
+        self.softcon_right_sr_button.grid(column=2, padx=2, pady=2, row=5)
+        self.softcon_right_stick = tk.Canvas(
+            self.softcon_right_frame, width=72, height=72, bg="#E9514E", highlightthickness=0
+        )
+        self.softcon_right_stick.grid(column=0, columnspan=3, padx=2, pady=2, row=6)
+        self._draw_softcon_stick(self.softcon_right_stick)
         self.softcon_right_frame.grid(column=1, ipadx=3, ipady=3, row=0, sticky="nsew")
         self.softcon_right_frame.grid_anchor("center")
         self.softcon_frame.pack(expand="true", fill="both", padx="0", pady="0", side="top")
@@ -1097,11 +1119,14 @@ class PokeControllerApp:
 
         # self.keys_software_controller = UnitCommand
         self.keys_software_controller = KeyPress(self.ser)
+        self.softcon_stick_directions = {}
 
         self.softcon_zl_button.bind("<Button-1>", lambda event, arg=Button.ZL: self.hold(event, arg))
         self.softcon_l_button.bind("<Button-1>", lambda event, arg=Button.L: self.hold(event, arg))
         self.softcon_minus_button.bind("<Button-1>", lambda event, arg=Button.MINUS: self.hold(event, arg))
         self.softcon_l_click_button.bind("<Button-1>", lambda event, arg=Button.LCLICK: self.hold(event, arg))
+        self.softcon_left_sl_button.bind("<Button-1>", lambda event, arg=Button.LEFT_SL: self.hold(event, arg))
+        self.softcon_left_sr_button.bind("<Button-1>", lambda event, arg=Button.LEFT_SR: self.hold(event, arg))
         self.softcon_up_button.bind("<Button-1>", lambda event, arg=Hat.TOP: self.hold(event, arg))
         self.softcon_left_button.bind("<Button-1>", lambda event, arg=Hat.LEFT: self.hold(event, arg))
         self.softcon_right_button.bind("<Button-1>", lambda event, arg=Hat.RIGHT: self.hold(event, arg))
@@ -1110,7 +1135,9 @@ class PokeControllerApp:
         self.softcon_zr_button.bind("<Button-1>", lambda event, arg=Button.ZR: self.hold(event, arg))
         self.softcon_r_button.bind("<Button-1>", lambda event, arg=Button.R: self.hold(event, arg))
         self.softcon_plus_button.bind("<Button-1>", lambda event, arg=Button.PLUS: self.hold(event, arg))
-        self.softcon_r_click_button.bind("<Button-1>", lambda event, arg=Button.R: self.hold(event, arg))
+        self.softcon_r_click_button.bind("<Button-1>", lambda event, arg=Button.RCLICK: self.hold(event, arg))
+        self.softcon_right_sl_button.bind("<Button-1>", lambda event, arg=Button.RIGHT_SL: self.hold(event, arg))
+        self.softcon_right_sr_button.bind("<Button-1>", lambda event, arg=Button.RIGHT_SR: self.hold(event, arg))
         self.softcon_x_button.bind("<Button-1>", lambda event, arg=Button.X: self.hold(event, arg))
         self.softcon_y_button.bind("<Button-1>", lambda event, arg=Button.Y: self.hold(event, arg))
         self.softcon_a_button.bind("<Button-1>", lambda event, arg=Button.A: self.hold(event, arg))
@@ -1121,6 +1148,8 @@ class PokeControllerApp:
         self.softcon_l_button.bind("<ButtonRelease-1>", lambda event, arg=Button.L: self.holdEnd(event, arg))
         self.softcon_minus_button.bind("<ButtonRelease-1>", lambda event, arg=Button.MINUS: self.holdEnd(event, arg))
         self.softcon_l_click_button.bind("<ButtonRelease-1>", lambda event, arg=Button.LCLICK: self.holdEnd(event, arg))
+        self.softcon_left_sl_button.bind("<ButtonRelease-1>", lambda event, arg=Button.LEFT_SL: self.holdEnd(event, arg))
+        self.softcon_left_sr_button.bind("<ButtonRelease-1>", lambda event, arg=Button.LEFT_SR: self.holdEnd(event, arg))
         self.softcon_up_button.bind("<ButtonRelease-1>", lambda event, arg=Hat.TOP: self.holdEnd(event, arg))
         self.softcon_left_button.bind("<ButtonRelease-1>", lambda event, arg=Hat.LEFT: self.holdEnd(event, arg))
         self.softcon_right_button.bind("<ButtonRelease-1>", lambda event, arg=Hat.RIGHT: self.holdEnd(event, arg))
@@ -1131,7 +1160,13 @@ class PokeControllerApp:
         self.softcon_zr_button.bind("<ButtonRelease-1>", lambda event, arg=Button.ZR: self.holdEnd(event, arg))
         self.softcon_r_button.bind("<ButtonRelease-1>", lambda event, arg=Button.R: self.holdEnd(event, arg))
         self.softcon_plus_button.bind("<ButtonRelease-1>", lambda event, arg=Button.PLUS: self.holdEnd(event, arg))
-        self.softcon_r_click_button.bind("<ButtonRelease-1>", lambda event, arg=Button.R: self.holdEnd(event, arg))
+        self.softcon_r_click_button.bind("<ButtonRelease-1>", lambda event, arg=Button.RCLICK: self.holdEnd(event, arg))
+        self.softcon_right_sl_button.bind(
+            "<ButtonRelease-1>", lambda event, arg=Button.RIGHT_SL: self.holdEnd(event, arg)
+        )
+        self.softcon_right_sr_button.bind(
+            "<ButtonRelease-1>", lambda event, arg=Button.RIGHT_SR: self.holdEnd(event, arg)
+        )
         self.softcon_x_button.bind("<ButtonRelease-1>", lambda event, arg=Button.X: self.holdEnd(event, arg))
         self.softcon_y_button.bind("<ButtonRelease-1>", lambda event, arg=Button.Y: self.holdEnd(event, arg))
         self.softcon_a_button.bind("<ButtonRelease-1>", lambda event, arg=Button.A: self.holdEnd(event, arg))
@@ -1147,6 +1182,12 @@ class PokeControllerApp:
         )
         self.softcon_l_click_button.bind(
             "<Shift-ButtonRelease-1>", lambda event, arg=Button.LCLICK: self.holdEndSkip(event, arg)
+        )
+        self.softcon_left_sl_button.bind(
+            "<Shift-ButtonRelease-1>", lambda event, arg=Button.LEFT_SL: self.holdEndSkip(event, arg)
+        )
+        self.softcon_left_sr_button.bind(
+            "<Shift-ButtonRelease-1>", lambda event, arg=Button.LEFT_SR: self.holdEndSkip(event, arg)
         )
         self.softcon_up_button.bind("<Shift-ButtonRelease-1>", lambda event, arg=Hat.TOP: self.holdEndSkip(event, arg))
         self.softcon_left_button.bind(
@@ -1169,7 +1210,23 @@ class PokeControllerApp:
             "<Shift-ButtonRelease-1>", lambda event, arg=Button.PLUS: self.holdEndSkip(event, arg)
         )
         self.softcon_r_click_button.bind(
-            "<Shift-ButtonRelease-1>", lambda event, arg=Button.R: self.holdEndSkip(event, arg)
+            "<Shift-ButtonRelease-1>", lambda event, arg=Button.RCLICK: self.holdEndSkip(event, arg)
+        )
+        self.softcon_right_sl_button.bind(
+            "<Shift-ButtonRelease-1>", lambda event, arg=Button.RIGHT_SL: self.holdEndSkip(event, arg)
+        )
+        self.softcon_right_sr_button.bind(
+            "<Shift-ButtonRelease-1>", lambda event, arg=Button.RIGHT_SR: self.holdEndSkip(event, arg)
+        )
+        self.softcon_left_stick.bind("<ButtonPress-1>", lambda event, arg=Stick.LEFT: self.softconStickMove(event, arg))
+        self.softcon_left_stick.bind("<Button1-Motion>", lambda event, arg=Stick.LEFT: self.softconStickMove(event, arg))
+        self.softcon_left_stick.bind(
+            "<ButtonRelease-1>", lambda event, arg=Stick.LEFT: self.softconStickRelease(event, arg)
+        )
+        self.softcon_right_stick.bind("<ButtonPress-1>", lambda event, arg=Stick.RIGHT: self.softconStickMove(event, arg))
+        self.softcon_right_stick.bind("<Button1-Motion>", lambda event, arg=Stick.RIGHT: self.softconStickMove(event, arg))
+        self.softcon_right_stick.bind(
+            "<ButtonRelease-1>", lambda event, arg=Stick.RIGHT: self.softconStickRelease(event, arg)
         )
         self.softcon_x_button.bind("<Shift-ButtonRelease-1>", lambda event, arg=Button.X: self.holdEndSkip(event, arg))
         self.softcon_y_button.bind("<Shift-ButtonRelease-1>", lambda event, arg=Button.Y: self.holdEndSkip(event, arg))
@@ -1357,6 +1414,22 @@ class PokeControllerApp:
     def _update_pabotbase2_controller_mode_state(self):
         state = "readonly" if self.serial_data_format_name.get() == "PABotBase2" else "disabled"
         self.pabotbase2_controller_mode_cb.configure(state=state)
+        self._update_softcon_controller_mode()
+
+    def _update_softcon_controller_mode(self):
+        if not hasattr(self, "softcon_left_frame"):
+            return
+        mode = self.pabotbase2_controller_mode.get() if self.serial_data_format_name.get() == "PABotBase2" else ""
+        self._set_softcon_frame_enabled(self.softcon_left_frame, mode != "Wireless Right Joy-Con")
+        self._set_softcon_frame_enabled(self.softcon_right_frame, mode != "Wireless Left Joy-Con")
+
+    def _set_softcon_frame_enabled(self, frame, enabled):
+        state = "normal" if enabled else "disabled"
+        for child in frame.winfo_children():
+            try:
+                child.configure(state=state)
+            except tk.TclError:
+                pass
 
     def applyFps(self, event=None):
         print("changed FPS to: " + self.fps.get() + " [fps]")
@@ -2084,6 +2157,48 @@ class PokeControllerApp:
         """
         event.widget["bg"] = "#FFD800"
         event.widget["fg"] = "#343434"
+
+    def _draw_softcon_stick(self, canvas):
+        center = 36
+        radius = 26
+        knob = 7
+        canvas.create_oval(center - radius, center - radius, center + radius, center + radius, outline="#343434", width=2)
+        canvas.create_oval(
+            center - knob,
+            center - knob,
+            center + knob,
+            center + knob,
+            fill="#343434",
+            tags=("handle",),
+        )
+
+    def softconStickMove(self, event, stick: Stick):
+        if event.widget["state"] == "disabled":
+            return
+        center = 36
+        radius = 26
+        knob = 7
+        dx = max(-radius, min(radius, event.x - center))
+        dy = max(-radius, min(radius, event.y - center))
+        distance = (dx * dx + dy * dy) ** 0.5
+        if distance > radius:
+            dx = dx * radius / distance
+            dy = dy * radius / distance
+        event.widget.coords("handle", center + dx - knob, center + dy - knob, center + dx + knob, center + dy + knob)
+        sx = round(128 + dx * 127 / radius)
+        sy = round(128 - dy * 127 / radius)
+        direction = Direction(stick, (sx, sy))
+        self.softcon_stick_directions[stick] = direction
+        self.keys_software_controller.input(direction, ifPrint=False)
+
+    def softconStickRelease(self, event, stick: Stick):
+        if event.widget["state"] == "disabled":
+            return
+        center = 36
+        knob = 7
+        event.widget.coords("handle", center - knob, center - knob, center + knob, center + knob)
+        direction = self.softcon_stick_directions.pop(stick, Direction(stick, (128, 128)))
+        self.keys_software_controller.inputEnd(direction, ifPrint=False)
 
     def holdForceEnd(self):
         """

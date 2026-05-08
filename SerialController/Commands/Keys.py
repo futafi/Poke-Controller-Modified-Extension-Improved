@@ -15,20 +15,24 @@ if TYPE_CHECKING:
 
 
 class Button(IntFlag):
-    Y = auto()  # 1
-    B = auto()  # 2
-    A = auto()  # 3
-    X = auto()  # 4
-    L = auto()  # 5
-    R = auto()  # 6
-    ZL = auto()  # 7
-    ZR = auto()  # 8
-    MINUS = auto()  # 9
-    PLUS = auto()  # 10
-    LCLICK = auto()  # 11
-    RCLICK = auto()  # 12
-    HOME = auto()  # 13
-    CAPTURE = auto()  # 14
+    Y = 1 << 0
+    B = 1 << 1
+    A = 1 << 2
+    X = 1 << 3
+    L = 1 << 4
+    R = 1 << 5
+    ZL = 1 << 6
+    ZR = 1 << 7
+    MINUS = 1 << 8
+    PLUS = 1 << 9
+    LCLICK = 1 << 10
+    RCLICK = 1 << 11
+    HOME = 1 << 12
+    CAPTURE = 1 << 13
+    LEFT_SL = 1 << 20
+    LEFT_SR = 1 << 21
+    RIGHT_SL = 1 << 22
+    RIGHT_SR = 1 << 23
     SELECT = MINUS  # for 3DS, 9
     START = PLUS  # for 3DS, 10
     POWER = LCLICK  # for 3DS, 11
@@ -51,6 +55,10 @@ conversion_default_button = {
     Button.RCLICK: Button.RCLICK,
     Button.HOME: Button.HOME,
     Button.CAPTURE: Button.CAPTURE,
+    Button.LEFT_SL: Button.LEFT_SL,
+    Button.LEFT_SR: Button.LEFT_SR,
+    Button.RIGHT_SL: Button.RIGHT_SL,
+    Button.RIGHT_SR: Button.RIGHT_SR,
     Button.SELECT: Button.SELECT,
     Button.START: Button.START,
     Button.POWER: Button.POWER,
@@ -75,6 +83,10 @@ conversion_3ds_controller_button = {
     Button.ZL: 0,
     Button.ZR: 0,
     Button.CAPTURE: 0,
+    Button.LEFT_SL: 0,
+    Button.LEFT_SR: 0,
+    Button.RIGHT_SL: 0,
+    Button.RIGHT_SR: 0,
     Button.WIRELESS: 0,
 }
 

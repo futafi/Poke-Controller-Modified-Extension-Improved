@@ -60,6 +60,10 @@ class Sender:
             "Button.RCLICK",
             "Button.HOME",
             "Button.CAPTURE",
+            "Button.LEFT_SL",
+            "Button.LEFT_SR",
+            "Button.RIGHT_SL",
+            "Button.RIGHT_SR",
         ]
         self.Hat = ["TOP", "TOP_RIGHT", "RIGHT", "BTM_RIGHT", "BTM", "BTM_LEFT", "LEFT", "TOP_LEFT", "CENTER"]
 

@@ -741,14 +741,26 @@ class ControllerGUI:
         root_geometry = root.geometry().split("+")
         root_x = int(root_geometry[1])
         root_y = int(root_geometry[2])
-        self.window.geometry("%dx%d%+d%+d" % (600, 300, 250 + root_x, 125 + root_y))
+        mode = (
+            getattr(ser, "pabotbase2_controller_mode_name", "")
+            if getattr(ser, "serial_data_format_name", "") == "PABotBase2"
+            else ""
+        )
+        self.show_left = mode != "Wireless Right Joy-Con"
+        self.show_right = mode != "Wireless Left Joy-Con"
+        width = 660 if self.show_left and self.show_right else 330
+        self.window.geometry("%dx%d%+d%+d" % (width, 360, 250 + root_x, 125 + root_y))
         self.window.resizable(False, False)
+        self.key = KeyPress(ser)
+        self.stick_directions = {}
 
         joycon_L_color = "#95f1ff"
         joycon_R_color = "#ff6b6b"
 
-        joycon_L_frame = tk.Frame(self.window, width=300, height=300, relief="flat", bg=joycon_L_color)
-        joycon_R_frame = tk.Frame(self.window, width=300, height=300, relief="flat", bg=joycon_R_color)
+        joycon_L_frame = tk.Frame(self.window, width=330, height=360, relief="flat", bg=joycon_L_color)
+        joycon_R_frame = tk.Frame(self.window, width=330, height=360, relief="flat", bg=joycon_R_color)
+        joycon_L_frame.grid_propagate(False)
+        joycon_R_frame.grid_propagate(False)
         hat_frame = tk.Frame(joycon_L_frame, relief="flat", bg=joycon_L_color)
         abxy_frame = tk.Frame(joycon_R_frame, relief="flat", bg=joycon_R_color)
 
@@ -757,7 +769,7 @@ class ControllerGUI:
         tk.Button(abxy_frame, text="B", command=lambda: UnitCommand.B().start(ser)).grid(row=2, column=1)
         tk.Button(abxy_frame, text="X", command=lambda: UnitCommand.X().start(ser)).grid(row=0, column=1)
         tk.Button(abxy_frame, text="Y", command=lambda: UnitCommand.Y().start(ser)).grid(row=1, column=0)
-        abxy_frame.place(relx=0.2, rely=0.3)
+        abxy_frame.place(x=55, y=115)
 
         # HAT
         tk.Button(hat_frame, text="UP", command=lambda: UnitCommand.UP().start(ser)).grid(row=0, column=1)
@@ -768,34 +780,44 @@ class ControllerGUI:
         tk.Button(hat_frame, text="", command=lambda: UnitCommand.DOWN_LEFT().start(ser)).grid(row=2, column=0)
         tk.Button(hat_frame, text="LEFT", command=lambda: UnitCommand.LEFT().start(ser)).grid(row=1, column=0)
         tk.Button(hat_frame, text="", command=lambda: UnitCommand.UP_LEFT().start(ser)).grid(row=0, column=0)
-        hat_frame.place(relx=0.2, rely=0.6)
+        hat_frame.place(x=55, y=210)
 
         # L side
-        tk.Button(joycon_L_frame, text="L", width=20, command=lambda: UnitCommand.L().start(ser)).place(x=30, y=30)
-        tk.Button(joycon_L_frame, text="ZL", width=20, command=lambda: UnitCommand.ZL().start(ser)).place(x=30, y=0)
+        tk.Button(joycon_L_frame, text="L", width=20, command=lambda: UnitCommand.L().start(ser)).place(x=35, y=34)
+        tk.Button(joycon_L_frame, text="ZL", width=20, command=lambda: UnitCommand.ZL().start(ser)).place(x=35, y=4)
         tk.Button(joycon_L_frame, text="LCLICK", width=7, command=lambda: UnitCommand.LCLICK().start(ser)).place(
-            x=120, y=120
+            x=130, y=145
         )
         tk.Button(joycon_L_frame, text="MINUS", width=5, command=lambda: UnitCommand.MINUS().start(ser)).place(
-            x=220, y=70
+            x=230, y=75
         )
         tk.Button(joycon_L_frame, text="CAP", width=5, command=lambda: UnitCommand.CAPTURE().start(ser)).place(
-            x=200, y=270
+            x=220, y=315
         )
+        tk.Button(joycon_L_frame, text="SL", width=5, command=lambda: UnitCommand.LEFT_SL().start(ser)).place(x=35, y=75)
+        tk.Button(joycon_L_frame, text="SR", width=5, command=lambda: UnitCommand.LEFT_SR().start(ser)).place(x=85, y=75)
+        self._make_stick_canvas(joycon_L_frame, Stick.LEFT, 125, 110, joycon_L_color)
 
         # R side
-        tk.Button(joycon_R_frame, text="R", width=20, command=lambda: UnitCommand.R().start(ser)).place(x=120, y=30)
-        tk.Button(joycon_R_frame, text="ZR", width=20, command=lambda: UnitCommand.ZR().start(ser)).place(x=120, y=0)
+        tk.Button(joycon_R_frame, text="R", width=20, command=lambda: UnitCommand.R().start(ser)).place(x=130, y=34)
+        tk.Button(joycon_R_frame, text="ZR", width=20, command=lambda: UnitCommand.ZR().start(ser)).place(x=130, y=4)
         tk.Button(joycon_R_frame, text="RCLICK", width=7, command=lambda: UnitCommand.RCLICK().start(ser)).place(
-            x=120, y=205
+            x=130, y=235
         )
-        tk.Button(joycon_R_frame, text="PLUS", width=5, command=lambda: UnitCommand.PLUS().start(ser)).place(x=35, y=70)
+        tk.Button(joycon_R_frame, text="PLUS", width=5, command=lambda: UnitCommand.PLUS().start(ser)).place(x=35, y=75)
         tk.Button(joycon_R_frame, text="HOME", width=5, command=lambda: UnitCommand.HOME().start(ser)).place(
-            x=50, y=270
+            x=50, y=315
         )
+        tk.Button(joycon_R_frame, text="SL", width=5, command=lambda: UnitCommand.RIGHT_SL().start(ser)).place(x=190, y=75)
+        tk.Button(joycon_R_frame, text="SR", width=5, command=lambda: UnitCommand.RIGHT_SR().start(ser)).place(x=240, y=75)
+        self._make_stick_canvas(joycon_R_frame, Stick.RIGHT, 125, 200, joycon_R_color)
 
-        joycon_L_frame.grid(row=0, column=0)
-        joycon_R_frame.grid(row=0, column=1)
+        column = 0
+        if self.show_left:
+            joycon_L_frame.grid(row=0, column=column)
+            column += 1
+        if self.show_right:
+            joycon_R_frame.grid(row=0, column=column)
 
         # button style settings
         for button in abxy_frame.winfo_children():
@@ -816,6 +838,40 @@ class ControllerGUI:
     def applyButtonColor(self, button):
         button["bg"] = "#343434"
         button["fg"] = "#fff"
+
+    def _make_stick_canvas(self, parent, stick, x, y, bg):
+        size = 92
+        center = size // 2
+        radius = 34
+        knob = 8
+        canvas = tk.Canvas(parent, width=size, height=size, bg=bg, highlightthickness=0)
+        canvas.place(x=x, y=y)
+        canvas.create_oval(center - radius, center - radius, center + radius, center + radius, outline="#343434", width=2)
+        handle = canvas.create_oval(center - knob, center - knob, center + knob, center + knob, fill="#343434")
+
+        def move(event):
+            dx = max(-radius, min(radius, event.x - center))
+            dy = max(-radius, min(radius, event.y - center))
+            distance = (dx * dx + dy * dy) ** 0.5
+            if distance > radius:
+                dx = dx * radius / distance
+                dy = dy * radius / distance
+            canvas.coords(handle, center + dx - knob, center + dy - knob, center + dx + knob, center + dy + knob)
+            sx = round(128 + dx * 127 / radius)
+            sy = round(128 - dy * 127 / radius)
+            direction = Direction(stick, (sx, sy))
+            self.stick_directions[stick] = direction
+            self.key.input(direction, ifPrint=False)
+
+        def release(_event):
+            canvas.coords(handle, center - knob, center - knob, center + knob, center + knob)
+            direction = self.stick_directions.pop(stick, Direction(stick, NEUTRAL))
+            self.key.inputEnd(direction, ifPrint=False)
+
+        canvas.bind("<ButtonPress-1>", move)
+        canvas.bind("<Button1-Motion>", move)
+        canvas.bind("<ButtonRelease-1>", release)
+        return canvas
 
     def bind(self, event, func):
         self.window.bind(event, func)

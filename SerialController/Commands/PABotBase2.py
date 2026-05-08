@@ -561,6 +561,8 @@ class PABotBase2Connection:
                     9: "PLUS",
                     11: "RCLICK",
                     12: "HOME",
+                    22: "RIGHT_SL",
+                    23: "RIGHT_SR",
                 },
             )
             if (rx, ry) != (128, 128):
@@ -576,6 +578,8 @@ class PABotBase2Connection:
                     8: "MINUS",
                     10: "LCLICK",
                     13: "CAPTURE",
+                    20: "LEFT_SL",
+                    21: "LEFT_SR",
                 },
             )
             if hat != 8:
@@ -602,6 +606,10 @@ class PABotBase2Connection:
             button3 |= 1 << 2
         if buttons & (1 << 2):  # A
             button3 |= 1 << 3
+        if buttons & (1 << 23):  # RIGHT_SR
+            button3 |= 1 << 4
+        if buttons & (1 << 22):  # RIGHT_SL
+            button3 |= 1 << 5
         if buttons & (1 << 5):  # R
             button3 |= 1 << 6
         if buttons & (1 << 7):  # ZR
@@ -618,6 +626,10 @@ class PABotBase2Connection:
             button4 |= 1 << 4
         if buttons & (1 << 13):  # CAPTURE
             button4 |= 1 << 5
+        if buttons & (1 << 21):  # LEFT_SR
+            button5 |= 1 << 4
+        if buttons & (1 << 20):  # LEFT_SL
+            button5 |= 1 << 5
         if buttons & (1 << 4):  # L
             button5 |= 1 << 6
         if buttons & (1 << 6):  # ZL
