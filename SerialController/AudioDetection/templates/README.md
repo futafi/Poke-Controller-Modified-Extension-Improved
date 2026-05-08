@@ -1,18 +1,16 @@
 # Audio Templates
 
-Place shiny sound WAV files here.
+Shiny sound templates from [PokemonAutomation/Packages](https://github.com/PokemonAutomation/Packages).
 
-## Required file
+## Included files
 
-- `ShinySound-48000.wav` — Shiny sparkle sound recorded at 48kHz mono
+| File | Game |
+|------|------|
+| `LGPE_ShinySound-48000.wav` | Let's Go Pikachu / Eevee |
+| `BDSP_ShinySound-48000.wav` | Brilliant Diamond / Shining Pearl |
+| `LA_ShinySound-48000.wav` | LEGENDS Arceus |
+| `SV_ShinySound-48000.mp3` | Scarlet / Violet |
+| `FRLG_ShinySound-48000.wav` | FireRed / LeafGreen |
+| `RSE_ShinySound-48000.wav` | Ruby / Sapphire / Emerald |
 
-## How to obtain
-
-### Option A: From pokemon-automation Packages
-Download from https://github.com/PokemonAutomation/Packages/
-Look for `Resources/PokemonLGPE/ShinySound-48000.wav`
-
-### Option B: Record yourself
-1. Encounter a shiny Pokémon (or find a video with the shiny sound)
-2. Record the sparkle sound effect (~1 second)
-3. Save as WAV, 48kHz, mono
+All files are 48kHz. Set `GAME_TITLE` in `listen_shiny_spectrogram.py` to select which template to use.

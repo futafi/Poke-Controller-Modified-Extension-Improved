@@ -37,16 +37,25 @@ def _compute_fft_magnitude(samples: np.ndarray) -> np.ndarray:
 
 
 def _load_audio_template(filepath: str, target_sample_rate: int) -> np.ndarray:
-    """Load a WAV file and build its spectrogram matrix (windows x frequencies)."""
-    sr, data = wavfile.read(filepath)
-
-    if data.ndim > 1:
-        data = data[:, 0]
-    data = data.astype(np.float32)
-    if data.dtype == np.int16:
-        pass
-    if np.max(np.abs(data)) > 2.0:
-        data = data / 32768.0
+    """Load a WAV/MP3 file and build its spectrogram matrix (windows x frequencies)."""
+    if filepath.lower().endswith(".mp3"):
+        from pydub import AudioSegment
+        audio = AudioSegment.from_mp3(filepath)
+        audio = audio.set_channels(1)
+        sr = audio.frame_rate
+        samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+        if audio.sample_width == 2:
+            samples = samples / 32768.0
+        elif audio.sample_width == 4:
+            samples = samples / 2147483648.0
+        data = samples
+    else:
+        sr, data = wavfile.read(filepath)
+        if data.ndim > 1:
+            data = data[:, 0]
+        data = data.astype(np.float32)
+        if np.max(np.abs(data)) > 2.0:
+            data = data / 32768.0
 
     if sr != target_sample_rate:
         from scipy.signal import resample
