@@ -247,6 +247,9 @@ class PokeControllerApp:
         self.settings_lf.configure(text="Settings")
         self.settings_lf.grid(column="0", padx="5", row="0", sticky="ew")
         self.serial_data_lf = ttk.Labelframe(self.serial_f)
+        self.serial_data_lf.columnconfigure(0, weight=0)
+        self.serial_data_lf.columnconfigure(1, weight=1)
+        self.serial_data_lf.columnconfigure(2, weight=0)
         self.serial_data_format_name_label = ttk.Label(self.serial_data_lf)
         self.serial_data_format_name_label.configure(anchor="center", text="Data Format: ")
         self.serial_data_format_name_label.grid(column="0", padx="5", pady="5", row="0", sticky="ew")
@@ -254,7 +257,7 @@ class PokeControllerApp:
         self.serial_data_format_name_cb = ttk.Combobox(self.serial_data_lf)
         self.serial_data_format_name = tk.StringVar(value="Default")
         self.serial_data_format_name_cb.configure(
-            state="normal", textvariable=self.serial_data_format_name, values=serial_data_format_list
+            state="normal", textvariable=self.serial_data_format_name, values=serial_data_format_list, width=22
         )
         self.serial_data_format_name_cb.grid(column="1", padx="5", pady="5", row="0", sticky="ew")
         self.serial_data_format_name_cb.bind("<<ComboboxSelected>>", self.set_serial_data_format)
@@ -271,13 +274,14 @@ class PokeControllerApp:
             state="readonly",
             textvariable=self.pabotbase2_controller_mode,
             values=Sender.PABOTBASE2_CONTROLLER_MODE_NAMES,
+            width=30,
         )
         self.pabotbase2_controller_mode_cb.grid(column="1", padx="5", pady="5", row="1", sticky="ew")
         self.pabotbase2_controller_mode_cb.bind("<<ComboboxSelected>>", self.set_pabotbase2_controller_mode)
-        self.serial_data_lf.configure(height="200", text="Data", width="200")
+        self.serial_data_lf.configure(height="200", text="Data", width="420")
         self.serial_data_lf.grid(column="0", padx="5", row="1", sticky="ew")
         # self.serial_f.configure(height='200', width='200')    # removed
-        self.serial_f.pack()
+        self.serial_f.pack(fill="both", expand=True)
         self.controller_nb.add(self.serial_f, padding="5", sticky="nsew", text="Serial")
         self.manual_control_f = ttk.Frame(self.controller_nb)
         self.software_lf = ttk.Labelframe(self.manual_control_f)
@@ -618,9 +622,9 @@ class PokeControllerApp:
         self.others_f.pack()
         self.controller_nb.add(self.others_f, sticky="nsew", text="Others")
         if platform.system() == "Windows" or platform.system() == "Darwin":
-            self.controller_nb.configure(height="150")
+            self.controller_nb.configure(height="210")
         else:
-            self.controller_nb.configure(height="180")
+            self.controller_nb.configure(height="240")
         self.controller_nb.grid(column="0", padx="5", pady="5", row="1", sticky="ew")
         self.output_area_f = ttk.Frame(self.main_frame)
         self.text_scroll_1 = ttk.LabelFrame(self.output_area_f, relief=tk.GROOVE)
