@@ -28,6 +28,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_CONNECTION_OPCODE_ASK_RESET,
     PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA,
     PABB2_CONNECTION_OPCODE_ASK_VERSION,
+    PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
     PABB2_CONNECTION_OPCODE_RET_BUFFER_SLOTS,
     PABB2_CONNECTION_OPCODE_RET_PACKET_SIZE,
     PABB2_CONNECTION_OPCODE_RET_RESET,
@@ -261,6 +262,40 @@ class PABotBase2Tests(unittest.TestCase):
         connection.connect(timeout=1.0)
 
         self.assertTrue(connection.connected)
+        self.assertEqual(connection.bad_crc_packets, 0)
+
+    def test_ignores_stale_reset_session_stream_info(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial)
+        connection.session_id = 0x12345678
+        body = struct.pack(
+            "<BBBB",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            0,
+            PACKET_HEADER_SIZE + CRC_SIZE,
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
+        )
+        packet = packet_with_crc(PABB2_CONNECTION_RESET_SESSION_ID, body)
+
+        connection._process_packet(packet)
+
+        self.assertEqual(connection.bad_crc_packets, 0)
+
+    def test_ignores_current_session_stream_info(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial)
+        connection.session_id = 0x12345678
+        body = struct.pack(
+            "<BBBB",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            0,
+            PACKET_HEADER_SIZE + CRC_SIZE,
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
+        )
+        packet = packet_with_crc(connection.session_id, body)
+
+        connection._process_packet(packet)
+
         self.assertEqual(connection.bad_crc_packets, 0)
 
     def test_connect_uses_selected_controller_mode(self):

@@ -383,6 +383,8 @@ class PABotBase2Connection:
         expected = struct.unpack_from("<I", packet, len(packet) - CRC_SIZE)[0]
         actual = pabb_crc32(self.session_id, packet[:-CRC_SIZE])
         if expected != actual and not self._matches_reset_handshake_crc(expected, packet):
+            if self._matches_stale_reset_session_info_crc(expected, packet):
+                return
             self.bad_crc_packets += 1
             self._logger.warning(
                 "Discarding PABotBase2 packet with CRC mismatch: "
@@ -420,13 +422,14 @@ class PABotBase2Connection:
         if opcode == PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA:
             self._process_incoming_stream_packet(seq, packet)
             return
-        if opcode in (
-            PABB2_CONNECTION_OPCODE_INFO_STREAM_DEAD,
-            PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
-            PABB2_CONNECTION_OPCODE_INFO_STREAM_SEND_FULL,
-            PABB2_CONNECTION_OPCODE_INFO_STREAM_RECV_FULL,
-        ):
+        if opcode == PABB2_CONNECTION_OPCODE_INFO_STREAM_DEAD:
             raise PABotBase2Error(f"PABotBase2 device reported stream error opcode: 0x{opcode:02x}")
+        if opcode in (PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY, PABB2_CONNECTION_OPCODE_INFO_STREAM_SEND_FULL):
+            self._logger.debug("Ignoring PABotBase2 stream info opcode: 0x%02x", opcode)
+            return
+        if opcode == PABB2_CONNECTION_OPCODE_INFO_STREAM_RECV_FULL:
+            self._logger.debug("Ignoring PABotBase2 stream receive-full info opcode: 0x%02x", opcode)
+            return
         if opcode == PABB2_CONNECTION_OPCODE_UNKNOWN_OPCODE:
             raise PABotBase2Error(f"PABotBase2 device reported unknown opcode: {packet[PACKET_HEADER_SIZE]}")
 
@@ -437,6 +440,16 @@ class PABotBase2Connection:
         if pending is None:
             return False
         if pending[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_ASK_RESET:
+            return False
+        return expected == pabb_crc32(PABB2_CONNECTION_RESET_SESSION_ID, packet[:-CRC_SIZE])
+
+    def _matches_stale_reset_session_info_crc(self, expected: int, packet: bytes) -> bool:
+        opcode = packet[3] & PABB2_CONNECTION_OPCODE_MASK
+        if opcode not in (
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_SEND_FULL,
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_RECV_FULL,
+        ):
             return False
         return expected == pabb_crc32(PABB2_CONNECTION_RESET_SESSION_ID, packet[:-CRC_SIZE])
 
