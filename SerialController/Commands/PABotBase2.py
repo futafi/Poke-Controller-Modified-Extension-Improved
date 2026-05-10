@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import struct
+import threading
 import time
 from collections import deque
 from enum import IntEnum
@@ -99,8 +100,10 @@ CRC_SIZE = 4
 DEFAULT_PACKET_SIZE = 24
 DEFAULT_REMOTE_SLOTS = 1
 CONNECT_BAUD_RATES = (921600, 115200)
-PABB2_PacketSender_RETRANSMIT_COUNTER = 2
 PABOTBASE2_STATE_HOLD_MS = 65535
+
+RETRANSMIT_INTERVAL_S = 0.2
+RETRANSMIT_THREAD_POLL_S = 0.1
 
 
 def _make_crc32c_table() -> list[int]:
@@ -130,6 +133,125 @@ def packet_with_crc(seed: int, body: bytes) -> bytes:
     return body + struct.pack("<I", pabb_crc32(seed, body))
 
 
+_COALESCER_SLOTS = 128
+_COALESCER_SLOTS_MASK = _COALESCER_SLOTS - 1
+_COALESCER_BUFFER_SIZE = 16384
+_COALESCER_BUFFER_MASK = _COALESCER_BUFFER_SIZE - 1
+
+
+class StreamCoalescer:
+    """Reorder and coalesce incoming stream packets that may arrive out of order.
+
+    Port of pokemon-automation's PABotBase2_StreamCoalescer.
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.slot_head: int = 0
+        self.slot_tail: int = 0
+        self.stream_free: int = 0
+        self.stream_head: int = 0
+        self.stream_tail: int = 0
+        self.lengths: list[int] = [0] * _COALESCER_SLOTS
+        self.end_offsets: list[int] = [0] * _COALESCER_SLOTS
+        self.buffer: bytearray = bytearray(_COALESCER_BUFFER_SIZE)
+
+    def free_bytes(self) -> int:
+        if self.slot_head == self.slot_tail:
+            return _COALESCER_BUFFER_SIZE
+        return (self.stream_free - self.stream_tail) & _COALESCER_BUFFER_MASK
+
+    def push_stream(self, seqnum: int, stream_offset: int, payload: bytes) -> bool:
+        self._advance_slot_head()
+
+        stream_size = len(payload)
+        if stream_size == 0:
+            self._push_packet(seqnum)
+            return True
+
+        if stream_size > _COALESCER_BUFFER_SIZE:
+            return False
+
+        diff = (seqnum - self.slot_head) & 0xFF
+        if diff >= _COALESCER_SLOTS:
+            return bool(diff & 0x80)
+
+        stream_offset_e = (stream_offset + stream_size) & 0xFFFF
+        if ((stream_offset_e - self.stream_free) & 0xFFFF) > _COALESCER_BUFFER_SIZE:
+            return False
+
+        slot_tail = self.slot_tail
+        if ((seqnum - slot_tail) & 0xFF) < _COALESCER_SLOTS:
+            self.slot_tail = (seqnum + 1) & 0xFF
+
+        stream_tail = self.stream_tail
+        if ((stream_offset_e - stream_tail) & 0xFFFF) < _COALESCER_BUFFER_SIZE:
+            self.stream_tail = stream_offset_e
+
+        index = seqnum & _COALESCER_SLOTS_MASK
+        self.lengths[index] = stream_size
+        self.end_offsets[index] = stream_offset_e
+        self._write_buffer(payload, stream_offset)
+        return True
+
+    def read(self, max_bytes: int = 4096) -> bytes:
+        self._advance_slot_head()
+        available = (self.stream_head - self.stream_free) & 0xFFFF
+        to_read = min(available, max_bytes)
+        if to_read == 0:
+            return b""
+        data = self._read_buffer(self.stream_free, to_read)
+        self.stream_free = (self.stream_free + to_read) & 0xFFFF
+        return data
+
+    def _push_packet(self, seqnum: int) -> None:
+        diff = (seqnum - self.slot_head) & 0xFF
+        if diff >= _COALESCER_SLOTS:
+            return
+
+        slot_tail = self.slot_tail
+        if ((seqnum - slot_tail) & 0xFF) < _COALESCER_SLOTS:
+            self.slot_tail = (seqnum + 1) & 0xFF
+
+        self.lengths[seqnum & _COALESCER_SLOTS_MASK] = 0xFF
+        self._advance_slot_head()
+
+    def _advance_slot_head(self) -> None:
+        while self.slot_head != self.slot_tail:
+            index = self.slot_head & _COALESCER_SLOTS_MASK
+            length = self.lengths[index]
+            if length == 0:
+                break
+            if length != 0xFF:
+                self.stream_head = self.end_offsets[index]
+            self.lengths[index] = 0
+            self.slot_head = (self.slot_head + 1) & 0xFF
+
+    def _write_buffer(self, data: bytes, stream_offset: int) -> None:
+        if not data:
+            return
+        start = stream_offset & _COALESCER_BUFFER_MASK
+        end = (stream_offset + len(data)) & _COALESCER_BUFFER_MASK
+        if start < end:
+            self.buffer[start:end] = data
+        else:
+            first = _COALESCER_BUFFER_SIZE - start
+            self.buffer[start:_COALESCER_BUFFER_SIZE] = data[:first]
+            self.buffer[:end] = data[first:]
+
+    def _read_buffer(self, stream_offset: int, length: int) -> bytes:
+        if length == 0:
+            return b""
+        start = stream_offset & _COALESCER_BUFFER_MASK
+        end = (stream_offset + length) & _COALESCER_BUFFER_MASK
+        if start < end:
+            return bytes(self.buffer[start:end])
+        first = _COALESCER_BUFFER_SIZE - start
+        return bytes(self.buffer[start:_COALESCER_BUFFER_SIZE]) + bytes(self.buffer[:end])
+
+
 class PABotBase2Connection:
     def __init__(self, serial_port: Any, controller_mode: ControllerMode | int = ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER):
         self.serial = serial_port
@@ -138,10 +260,9 @@ class PABotBase2Connection:
         self.max_packet_size = DEFAULT_PACKET_SIZE
         self.remote_slot_capacity = DEFAULT_REMOTE_SLOTS
         self.seqnum = 0
-        self.pending_packets: dict[int, bytes] = {}
-        self.retransmit_counter = 0
+        self.pending_packets: dict[int, tuple[bytes, float]] = {}
         self.stream_offset = 0
-        self.recv_stream_offset = 0
+        self._recv_coalescer = StreamCoalescer()
         self.packet_buffer = bytearray()
         self.stream_buffer = bytearray()
         self.responses: dict[int, bytes] = {}
@@ -154,6 +275,9 @@ class PABotBase2Connection:
         self.device_protocol = 0
         self.device_id = 0
         self.bad_crc_packets = 0
+
+        self._retransmit_stop = threading.Event()
+        self._retransmit_thread: threading.Thread | None = None
 
         self._logger = getLogger(__name__)
         self._logger.addHandler(NullHandler())
@@ -169,6 +293,7 @@ class PABotBase2Connection:
                 self._reset_input_buffer()
                 self._reset(random_session_id=False, timeout=0.1)
                 self._finish_connect()
+                self._start_retransmit_thread()
                 return
             except Exception as e:
                 last_error = e
@@ -181,6 +306,7 @@ class PABotBase2Connection:
                     self._reset_input_buffer()
                     self._reset(random_session_id=True, timeout=0.1)
                     self._finish_connect()
+                    self._start_retransmit_thread()
                     return
                 except Exception as e:
                     last_error = e
@@ -212,6 +338,32 @@ class PABotBase2Connection:
 
     def close(self) -> None:
         self.connected = False
+        self._stop_retransmit_thread()
+
+    def _start_retransmit_thread(self) -> None:
+        self._retransmit_stop.clear()
+        self._retransmit_thread = threading.Thread(
+            target=self._retransmit_thread_func, daemon=True
+        )
+        self._retransmit_thread.start()
+
+    def _stop_retransmit_thread(self) -> None:
+        self._retransmit_stop.set()
+        t = self._retransmit_thread
+        if t is not None:
+            t.join(timeout=1.0)
+            self._retransmit_thread = None
+
+    def _retransmit_thread_func(self) -> None:
+        while not self._retransmit_stop.wait(RETRANSMIT_THREAD_POLL_S):
+            if not self.connected:
+                continue
+            if not self.pending_packets:
+                continue
+            try:
+                self._maybe_retransmit()
+            except Exception:
+                pass
 
     def send_controller_state(self, send_format: Any) -> None:
         if not self.connected:
@@ -240,9 +392,8 @@ class PABotBase2Connection:
         self.remote_slot_capacity = DEFAULT_REMOTE_SLOTS
         self.seqnum = 0
         self.pending_packets.clear()
-        self.retransmit_counter = 0
         self.stream_offset = 0
-        self.recv_stream_offset = 0
+        self._recv_coalescer.reset()
         self.packet_buffer.clear()
         self.stream_buffer.clear()
         self.responses.clear()
@@ -324,7 +475,7 @@ class PABotBase2Connection:
     def _send_packet_body(self, body: bytes, seed: int) -> None:
         seq = body[1]
         packet = packet_with_crc(seed, body)
-        self.pending_packets[seq] = packet
+        self.pending_packets[seq] = (packet, time.monotonic())
         self.serial.write(packet)
 
     def _wait_for_pending(self, timeout: float) -> None:
@@ -338,16 +489,16 @@ class PABotBase2Connection:
             self._maybe_retransmit()
 
     def _maybe_retransmit(self) -> None:
-        self.retransmit_counter = (self.retransmit_counter + 1) & 0xFF
-        if self.retransmit_counter % PABB2_PacketSender_RETRANSMIT_COUNTER:
-            return
-        for seq, packet in list(self.pending_packets.items())[:1]:
-            packet = bytearray(packet)
-            packet[3] |= PABB2_CONNECTION_RETRANSMIT_FLAG
-            body = bytes(packet[:-CRC_SIZE])
-            packet = bytearray(packet_with_crc(self.session_id, body))
-            self.serial.write(packet)
-            self.pending_packets[seq] = bytes(packet)
+        now = time.monotonic()
+        for seq, (packet_data, sent_time) in list(self.pending_packets.items()):
+            if now - sent_time < RETRANSMIT_INTERVAL_S:
+                continue
+            retransmit_body = bytearray(packet_data[:-CRC_SIZE])
+            retransmit_body[3] |= PABB2_CONNECTION_RETRANSMIT_FLAG
+            retransmit_packet = packet_with_crc(self.session_id, bytes(retransmit_body))
+            self.serial.write(retransmit_packet)
+            self.pending_packets[seq] = (retransmit_packet, now)
+            break
 
     def _drain_input(self, timeout: float) -> None:
         end = time.monotonic() + timeout
@@ -439,7 +590,8 @@ class PABotBase2Connection:
         pending = self.pending_packets.get(packet[1])
         if pending is None:
             return False
-        if pending[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_ASK_RESET:
+        packet_data, _ = pending
+        if packet_data[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_ASK_RESET:
             return False
         return expected == pabb_crc32(PABB2_CONNECTION_RESET_SESSION_ID, packet[:-CRC_SIZE])
 
@@ -456,15 +608,20 @@ class PABotBase2Connection:
     def _process_incoming_stream_packet(self, seq: int, packet: bytes) -> None:
         stream_offset = struct.unpack_from("<H", packet, PACKET_HEADER_SIZE)[0]
         payload = packet[PACKET_DATA_HEADER_SIZE:-CRC_SIZE]
-        if stream_offset == self.recv_stream_offset:
-            self.recv_stream_offset = (self.recv_stream_offset + len(payload)) & 0xFFFF
-            self.stream_buffer.extend(payload)
+
+        if not self._recv_coalescer.push_stream(seq, stream_offset, payload):
+            return
+
+        self._send_oob_u16(
+            seq,
+            PABB2_CONNECTION_OPCODE_RET_STREAM_DATA,
+            self._recv_coalescer.free_bytes(),
+        )
+
+        data = self._recv_coalescer.read()
+        if data:
+            self.stream_buffer.extend(data)
             self._parse_messages()
-        elif (stream_offset - self.recv_stream_offset) & 0xFFFF < 0x8000:
-            raise PABotBase2Error(
-                f"Out-of-order PABotBase2 stream packet: got {stream_offset}, expected {self.recv_stream_offset}"
-            )
-        self._send_oob_u16(seq, PABB2_CONNECTION_OPCODE_RET_STREAM_DATA, 4096)
 
     def _send_oob_u16(self, seq: int, opcode: int, data: int) -> None:
         body = struct.pack("<BBBBH", PABB2_CONNECTION_MAGIC_NUMBER, seq, 10, opcode, data & 0xFFFF)
