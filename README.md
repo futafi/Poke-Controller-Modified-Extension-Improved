@@ -29,13 +29,6 @@ Poke-Controllerの概要は[KawaSwitch](https://github.com/KawaSwitch)氏が開�
 
 必要なライブラリは[requirements.txt](requirements.txt)を参照してください。
 
-
-## Wiki
-
-現在作成を検討しております。
-3DSの自動化については[こちら](https://draco-meteor.hatenablog.com/entry/20240514)の記事を参照ください。
-
-
 ## 謝辞
 
 [Poke-Controller](https://github.com/KawaSwitch/Poke-Controller)の開発者である[KawaSwitch](https://github.com/KawaSwitch)氏、[Poke-Controller Modified](https://github.com/Moi-poke/Poke-Controller-Modified)の開発者である[Moi-poke](https://github.com/Moi-poke)氏、[Poke-Controller Modified Extension](https://github.com/futo030/Poke-Controller-Modified-Extension)の開発者である[Futo030](https://github.com/futo030)氏、および[Pokemon Automation](https://github.com/PokemonAutomation)の開発者である[Alexander J. Yee](https://github.com/Mysticial)氏にそれぞれ感謝申し上げます。
