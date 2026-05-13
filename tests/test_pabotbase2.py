@@ -89,7 +89,7 @@ class FakeSerial:
         self.reset_ack_uses_reset_seed = False
         self.ignore_no_session_reset = False
         self.message_protocol = PABB2_MESSAGE_PROTOCOL_VERSION
-        self.firmware_version = 2026051000
+        self.firmware_version = 2026051001
 
     @property
     def in_waiting(self):
