@@ -603,6 +603,7 @@ class PABotBase2Connection:
             expected != actual
             and not self._matches_reset_handshake_crc(expected, packet)
             and not self._matches_legacy_retransmit_crc(expected, packet)
+            and not self._matches_low24_retransmit_crc(expected, actual, packet)
         ):
             if self._matches_stale_reset_session_info_crc(expected, packet):
                 return
@@ -660,6 +661,11 @@ class PABotBase2Connection:
         original_body = bytearray(packet[:-CRC_SIZE])
         original_body[3] &= PABB2_CONNECTION_OPCODE_MASK
         return expected == pabb_crc32(self.session_id, bytes(original_body))
+
+    def _matches_low24_retransmit_crc(self, expected: int, actual: int, packet: bytes) -> bool:
+        if not (packet[3] & PABB2_CONNECTION_RETRANSMIT_FLAG):
+            return False
+        return (expected & 0x00FFFFFF) == (actual & 0x00FFFFFF)
 
     def _matches_reset_handshake_crc(self, expected: int, packet: bytes) -> bool:
         if packet[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_RET_RESET:

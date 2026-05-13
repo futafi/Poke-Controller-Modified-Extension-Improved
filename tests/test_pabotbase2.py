@@ -350,6 +350,52 @@ class PABotBase2Tests(unittest.TestCase):
             )
         )
 
+    def test_accepts_retransmit_crc_when_low_24_bits_match(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial)
+        connection.session_id = 0x12345678
+        message = struct.pack("<HBB", MESSAGE_HEADER_SIZE, PABB2_MESSAGE_OPCODE_CQ_COMMAND_FINISHED, 0)
+        body = struct.pack(
+            "<BBBBH",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            89,
+            PACKET_DATA_HEADER_SIZE + len(message) + CRC_SIZE,
+            PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA | PABB2_CONNECTION_RETRANSMIT_FLAG,
+            0,
+        ) + message
+        actual = pabb_crc32(connection.session_id, body)
+        expected = actual ^ 0xC5000000
+        packet = body + struct.pack("<I", expected)
+
+        connection._process_packet(packet)
+
+        self.assertEqual(connection.bad_crc_packets, 0)
+        self.assertTrue(
+            any(
+                len(packet) >= PACKET_HEADER_SIZE
+                and packet[3] & 0x7F == PABB2_CONNECTION_OPCODE_RET_STREAM_DATA
+                for packet in serial.written
+            )
+        )
+
+    def test_rejects_non_retransmit_crc_when_low_24_bits_match(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial)
+        connection.session_id = 0x12345678
+        body = struct.pack(
+            "<BBBB",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            1,
+            PACKET_HEADER_SIZE + CRC_SIZE,
+            PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
+        )
+        actual = pabb_crc32(connection.session_id, body)
+        packet = body + struct.pack("<I", actual ^ 0xC5000000)
+
+        connection._process_packet(packet)
+
+        self.assertEqual(connection.bad_crc_packets, 1)
+
     def test_connect_uses_selected_controller_mode(self):
         for mode_name, mode in PABOTBASE2_CONTROLLER_MODE_BY_NAME.items():
             with self.subTest(mode=mode_name):
