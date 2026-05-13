@@ -350,7 +350,7 @@ class PABotBase2Tests(unittest.TestCase):
             )
         )
 
-    def test_accepts_retransmit_crc_when_low_24_bits_match(self):
+    def test_rejects_retransmit_crc_when_only_low_24_bits_match(self):
         serial = FakeSerial()
         connection = PABotBase2Connection(serial)
         connection.session_id = 0x12345678
@@ -367,16 +367,12 @@ class PABotBase2Tests(unittest.TestCase):
         expected = actual ^ 0xC5000000
         packet = body + struct.pack("<I", expected)
 
-        connection._process_packet(packet)
+        with self.assertLogs("Commands.PABotBase2", level="WARNING") as logs:
+            connection._process_packet(packet)
 
-        self.assertEqual(connection.bad_crc_packets, 0)
-        self.assertTrue(
-            any(
-                len(packet) >= PACKET_HEADER_SIZE
-                and packet[3] & 0x7F == PABB2_CONNECTION_OPCODE_RET_STREAM_DATA
-                for packet in serial.written
-            )
-        )
+        self.assertEqual(connection.bad_crc_packets, 1)
+        self.assertEqual(serial.written, [])
+        self.assertIn("low24_match=True", logs.output[0])
 
     def test_rejects_non_retransmit_crc_when_low_24_bits_match(self):
         serial = FakeSerial()

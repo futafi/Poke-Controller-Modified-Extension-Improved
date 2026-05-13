@@ -332,6 +332,7 @@ class PABotBase2Connection:
         self.device_id = 0
         self.supported_controller_modes: set[ControllerMode] = set()
         self.bad_crc_packets = 0
+        self._crc_mismatch_counts: dict[tuple[int, int, int, int, int], int] = {}
 
         self._retransmit_stop = threading.Event()
         self._retransmit_thread: threading.Thread | None = None
@@ -464,6 +465,7 @@ class PABotBase2Connection:
         self.responses.clear()
         self.connected = False
         self.supported_controller_modes.clear()
+        self._crc_mismatch_counts.clear()
 
     def _reset_input_buffer(self) -> None:
         if hasattr(self.serial, "reset_input_buffer"):
@@ -603,20 +605,11 @@ class PABotBase2Connection:
             expected != actual
             and not self._matches_reset_handshake_crc(expected, packet)
             and not self._matches_legacy_retransmit_crc(expected, packet)
-            and not self._matches_low24_retransmit_crc(expected, actual, packet)
         ):
             if self._matches_stale_reset_session_info_crc(expected, packet):
                 return
             self.bad_crc_packets += 1
-            self._logger.warning(
-                "Discarding PABotBase2 packet with CRC mismatch: "
-                "seq=%d opcode=0x%02x bytes=%d expected=0x%08x actual=0x%08x",
-                packet[1],
-                packet[3] if len(packet) > 3 else 0,
-                len(packet),
-                expected,
-                actual,
-            )
+            self._log_crc_mismatch(packet, expected, actual)
             return
 
         _, seq, _, raw_opcode = struct.unpack_from("<BBBB", packet)
@@ -662,10 +655,47 @@ class PABotBase2Connection:
         original_body[3] &= PABB2_CONNECTION_OPCODE_MASK
         return expected == pabb_crc32(self.session_id, bytes(original_body))
 
-    def _matches_low24_retransmit_crc(self, expected: int, actual: int, packet: bytes) -> bool:
-        if not (packet[3] & PABB2_CONNECTION_RETRANSMIT_FLAG):
-            return False
-        return (expected & 0x00FFFFFF) == (actual & 0x00FFFFFF)
+    def _log_crc_mismatch(self, packet: bytes, expected: int, actual: int) -> None:
+        seq = packet[1]
+        raw_opcode = packet[3]
+        key = (seq, raw_opcode, len(packet), expected, actual)
+        count = self._crc_mismatch_counts.get(key, 0) + 1
+        self._crc_mismatch_counts[key] = count
+        if count != 1 and count % 16 != 0:
+            return
+
+        opcode = raw_opcode & PABB2_CONNECTION_OPCODE_MASK
+        retransmit = bool(raw_opcode & PABB2_CONNECTION_RETRANSMIT_FLAG)
+        stream_offset: int | None = None
+        if opcode == PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA and len(packet) >= PACKET_DATA_HEADER_SIZE + CRC_SIZE:
+            stream_offset = struct.unpack_from("<H", packet, PACKET_HEADER_SIZE)[0]
+
+        unflagged_crc = "n/a"
+        if retransmit:
+            unflagged_body = bytearray(packet[:-CRC_SIZE])
+            unflagged_body[3] &= PABB2_CONNECTION_OPCODE_MASK
+            unflagged_crc = f"0x{pabb_crc32(self.session_id, bytes(unflagged_body)):08x}"
+
+        preview = packet[:32].hex()
+        if len(packet) > 32:
+            preview += "..."
+
+        self._logger.warning(
+            "Discarding PABotBase2 packet with CRC mismatch: "
+            "seq=%d opcode=0x%02x bytes=%d retransmit=%s stream_offset=%s "
+            "expected=0x%08x actual=0x%08x unflagged=%s low24_match=%s repeat=%d raw=%s",
+            seq,
+            raw_opcode,
+            len(packet),
+            retransmit,
+            stream_offset,
+            expected,
+            actual,
+            unflagged_crc,
+            (expected & 0x00FFFFFF) == (actual & 0x00FFFFFF),
+            count,
+            preview,
+        )
 
     def _matches_reset_handshake_crc(self, expected: int, packet: bytes) -> bool:
         if packet[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_RET_RESET:
