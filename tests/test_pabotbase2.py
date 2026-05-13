@@ -38,6 +38,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_CONNECTION_RESET_SESSION_ID,
     PABB2_MESSAGE_CMD_NS_WIRED_CONTROLLER_STATE,
     PABB2_MESSAGE_CMD_NS1_OEM_CONTROLLER_BUTTONS,
+    PABB2_MESSAGE_PROTOCOL_VERSION,
     PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE,
     PABB2_MESSAGE_OPCODE_CONTROLLER_LIST,
     PABB2_MESSAGE_OPCODE_CQ_CANCEL,
@@ -52,6 +53,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_MESSAGE_OPCODE_RET,
     PABB2_MESSAGE_OPCODE_RET_DATA,
     PABB2_MESSAGE_OPCODE_RET_U32,
+    PABB2_MESSAGE_OPCODE_SET_LOGGING_FLAG,
     pabb_crc32,
     packet_with_crc,
 )
@@ -82,9 +84,12 @@ class FakeSerial:
         ]
         self.command_messages = []
         self.mode_requests = []
+        self.logging_flags = []
         self.inject_bad_crc_before_reset_ack = False
         self.reset_ack_uses_reset_seed = False
         self.ignore_no_session_reset = False
+        self.message_protocol = PABB2_MESSAGE_PROTOCOL_VERSION
+        self.firmware_version = 2026051000
 
     @property
     def in_waiting(self):
@@ -191,10 +196,13 @@ class FakeSerial:
         if opcode == PABB2_MESSAGE_CMD_NS1_OEM_CONTROLLER_BUTTONS:
             self.command_messages.append(message)
             return
+        if opcode == PABB2_MESSAGE_OPCODE_SET_LOGGING_FLAG:
+            self.logging_flags.append(struct.unpack_from("<I", message, MESSAGE_HEADER_SIZE)[0])
+            return
         if opcode == PABB2_MESSAGE_OPCODE_PROTOCOL_VERSION:
-            self._ret_u32(request_id, 2026041105)
+            self._ret_u32(request_id, self.message_protocol)
         elif opcode == PABB2_MESSAGE_OPCODE_FIRMWARE_VERSION:
-            self._ret_u32(request_id, 2026050100)
+            self._ret_u32(request_id, self.firmware_version)
         elif opcode == PABB2_MESSAGE_OPCODE_DEVICE_IDENTIFIER:
             self._ret_u32(request_id, 0x25)
         elif opcode == PABB2_MESSAGE_OPCODE_DEVICE_NAME:
@@ -248,6 +256,7 @@ class PABotBase2Tests(unittest.TestCase):
         self.assertTrue(connection.connected)
         self.assertEqual(connection.device_name, "Fake PABotBase2")
         self.assertEqual(serial.controller_mode, int(ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER))
+        self.assertEqual(serial.logging_flags, [0])
         self.assertTrue(
             any(
                 len(packet) >= PACKET_DATA_HEADER_SIZE
@@ -322,7 +331,7 @@ class PABotBase2Tests(unittest.TestCase):
 
         self.assertEqual(connection.bad_crc_packets, 0)
 
-    def test_accepts_legacy_retransmit_crc_without_recomputed_flag(self):
+    def test_rejects_retransmit_crc_without_recomputed_flag(self):
         serial = FakeSerial()
         connection = PABotBase2Connection(serial)
         connection.session_id = 0x12345678
@@ -341,14 +350,8 @@ class PABotBase2Tests(unittest.TestCase):
 
         connection._process_packet(packet)
 
-        self.assertEqual(connection.bad_crc_packets, 0)
-        self.assertTrue(
-            any(
-                len(packet) >= PACKET_HEADER_SIZE
-                and packet[3] & 0x7F == PABB2_CONNECTION_OPCODE_RET_STREAM_DATA
-                for packet in serial.written
-            )
-        )
+        self.assertEqual(connection.bad_crc_packets, 1)
+        self.assertEqual(serial.written, [])
 
     def test_rejects_retransmit_crc_when_only_low_24_bits_match(self):
         serial = FakeSerial()
@@ -367,12 +370,10 @@ class PABotBase2Tests(unittest.TestCase):
         expected = actual ^ 0xC5000000
         packet = body + struct.pack("<I", expected)
 
-        with self.assertLogs("Commands.PABotBase2", level="WARNING") as logs:
-            connection._process_packet(packet)
+        connection._process_packet(packet)
 
         self.assertEqual(connection.bad_crc_packets, 1)
         self.assertEqual(serial.written, [])
-        self.assertIn("low24_match=True", logs.output[0])
 
     def test_rejects_non_retransmit_crc_when_low_24_bits_match(self):
         serial = FakeSerial()
@@ -408,6 +409,14 @@ class PABotBase2Tests(unittest.TestCase):
         connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER)
 
         with self.assertRaisesRegex(PABotBase2Error, "does not support selected controller mode"):
+            connection.connect(timeout=0.25)
+
+    def test_connect_fails_fast_on_old_message_protocol(self):
+        serial = FakeSerial()
+        serial.message_protocol = 2026041105
+        connection = PABotBase2Connection(serial)
+
+        with self.assertRaisesRegex(PABotBase2Error, "Incompatible PABotBase2 message protocol"):
             connection.connect(timeout=0.25)
 
     def test_wired_pro_controller_uses_oem_state_message(self):

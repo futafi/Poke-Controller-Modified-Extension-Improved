@@ -107,6 +107,9 @@ def controller_mode_is_right_joycon(mode_name: str) -> bool:
 PABB2_CONNECTION_MAGIC_NUMBER = 0x81
 PABB2_CONNECTION_PROTOCOL_VERSION = 2026041102
 PABB2_CONNECTION_RESET_SESSION_ID = 0xFFFFFFFF
+PABB2_MESSAGE_PROTOCOL_VERSION = 2026050901
+PABB2_MIN_FIRMWARE_VERSION = 2026050100
+PABB2_DEVICE_LOGGING_FLAG = 0
 
 PABB2_CONNECTION_RETRANSMIT_FLAG = 0x80
 PABB2_CONNECTION_OPCODE_MASK = 0x7F
@@ -133,11 +136,13 @@ PABB2_CONNECTION_OPCODE_UNKNOWN_OPCODE = 0x32
 PABB2_MESSAGE_OPCODE_RET = 0x11
 PABB2_MESSAGE_OPCODE_RET_U32 = 0x12
 PABB2_MESSAGE_OPCODE_RET_DATA = 0x13
+PABB2_MESSAGE_OPCODE_RET_U32_DATA = 0x14
 PABB2_MESSAGE_OPCODE_PROTOCOL_VERSION = 0x20
 PABB2_MESSAGE_OPCODE_FIRMWARE_VERSION = 0x21
 PABB2_MESSAGE_OPCODE_DEVICE_IDENTIFIER = 0x22
 PABB2_MESSAGE_OPCODE_DEVICE_NAME = 0x23
 PABB2_MESSAGE_OPCODE_CONTROLLER_LIST = 0x24
+PABB2_MESSAGE_OPCODE_SET_LOGGING_FLAG = 0x25
 PABB2_MESSAGE_OPCODE_CQ_CAPACITY = 0x28
 PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE = 0x30
 PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE = 0x31
@@ -332,7 +337,6 @@ class PABotBase2Connection:
         self.device_id = 0
         self.supported_controller_modes: set[ControllerMode] = set()
         self.bad_crc_packets = 0
-        self._crc_mismatch_counts: dict[tuple[int, int, int, int, int], int] = {}
 
         self._retransmit_stop = threading.Event()
         self._retransmit_thread: threading.Thread | None = None
@@ -354,7 +358,7 @@ class PABotBase2Connection:
                 self._start_retransmit_thread()
                 return
             except Exception as e:
-                if self._is_unsupported_selected_controller_mode_error(e):
+                if self._is_fatal_connect_error(e):
                     raise
                 last_error = e
                 self._reset_runtime_state()
@@ -369,7 +373,7 @@ class PABotBase2Connection:
                     self._start_retransmit_thread()
                     return
                 except Exception as e:
-                    if self._is_unsupported_selected_controller_mode_error(e):
+                    if self._is_fatal_connect_error(e):
                         raise
                     last_error = e
                     self._reset_runtime_state()
@@ -379,8 +383,15 @@ class PABotBase2Connection:
         raise PABotBase2Error("Unable to connect to PABotBase2 device.")
 
     @staticmethod
-    def _is_unsupported_selected_controller_mode_error(error: Exception) -> bool:
-        return isinstance(error, PABotBase2Error) and "does not support selected controller mode" in str(error)
+    def _is_fatal_connect_error(error: Exception) -> bool:
+        if not isinstance(error, PABotBase2Error):
+            return False
+        message = str(error)
+        return (
+            "does not support selected controller mode" in message
+            or "Incompatible PABotBase2 message protocol" in message
+            or "Incompatible PABotBase2 firmware version" in message
+        )
 
     def _finish_connect(self) -> None:
         self._send_connection_request(PABB2_CONNECTION_OPCODE_ASK_VERSION, timeout=0.5)
@@ -465,7 +476,6 @@ class PABotBase2Connection:
         self.responses.clear()
         self.connected = False
         self.supported_controller_modes.clear()
-        self._crc_mismatch_counts.clear()
 
     def _reset_input_buffer(self) -> None:
         if hasattr(self.serial, "reset_input_buffer"):
@@ -604,12 +614,19 @@ class PABotBase2Connection:
         if (
             expected != actual
             and not self._matches_reset_handshake_crc(expected, packet)
-            and not self._matches_legacy_retransmit_crc(expected, packet)
         ):
             if self._matches_stale_reset_session_info_crc(expected, packet):
                 return
             self.bad_crc_packets += 1
-            self._log_crc_mismatch(packet, expected, actual)
+            self._logger.warning(
+                "Discarding PABotBase2 packet with CRC mismatch: "
+                "seq=%d opcode=0x%02x bytes=%d expected=0x%08x actual=0x%08x",
+                packet[1],
+                packet[3] if len(packet) > 3 else 0,
+                len(packet),
+                expected,
+                actual,
+            )
             return
 
         _, seq, _, raw_opcode = struct.unpack_from("<BBBB", packet)
@@ -647,55 +664,6 @@ class PABotBase2Connection:
             return
         if opcode == PABB2_CONNECTION_OPCODE_UNKNOWN_OPCODE:
             raise PABotBase2Error(f"PABotBase2 device reported unknown opcode: {packet[PACKET_HEADER_SIZE]}")
-
-    def _matches_legacy_retransmit_crc(self, expected: int, packet: bytes) -> bool:
-        if not (packet[3] & PABB2_CONNECTION_RETRANSMIT_FLAG):
-            return False
-        original_body = bytearray(packet[:-CRC_SIZE])
-        original_body[3] &= PABB2_CONNECTION_OPCODE_MASK
-        return expected == pabb_crc32(self.session_id, bytes(original_body))
-
-    def _log_crc_mismatch(self, packet: bytes, expected: int, actual: int) -> None:
-        seq = packet[1]
-        raw_opcode = packet[3]
-        key = (seq, raw_opcode, len(packet), expected, actual)
-        count = self._crc_mismatch_counts.get(key, 0) + 1
-        self._crc_mismatch_counts[key] = count
-        if count != 1 and count % 16 != 0:
-            return
-
-        opcode = raw_opcode & PABB2_CONNECTION_OPCODE_MASK
-        retransmit = bool(raw_opcode & PABB2_CONNECTION_RETRANSMIT_FLAG)
-        stream_offset: int | None = None
-        if opcode == PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA and len(packet) >= PACKET_DATA_HEADER_SIZE + CRC_SIZE:
-            stream_offset = struct.unpack_from("<H", packet, PACKET_HEADER_SIZE)[0]
-
-        unflagged_crc = "n/a"
-        if retransmit:
-            unflagged_body = bytearray(packet[:-CRC_SIZE])
-            unflagged_body[3] &= PABB2_CONNECTION_OPCODE_MASK
-            unflagged_crc = f"0x{pabb_crc32(self.session_id, bytes(unflagged_body)):08x}"
-
-        preview = packet[:32].hex()
-        if len(packet) > 32:
-            preview += "..."
-
-        self._logger.warning(
-            "Discarding PABotBase2 packet with CRC mismatch: "
-            "seq=%d opcode=0x%02x bytes=%d retransmit=%s stream_offset=%s "
-            "expected=0x%08x actual=0x%08x unflagged=%s low24_match=%s repeat=%d raw=%s",
-            seq,
-            raw_opcode,
-            len(packet),
-            retransmit,
-            stream_offset,
-            expected,
-            actual,
-            unflagged_crc,
-            (expected & 0x00FFFFFF) == (actual & 0x00FFFFFF),
-            count,
-            preview,
-        )
 
     def _matches_reset_handshake_crc(self, expected: int, packet: bytes) -> bool:
         if packet[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_RET_RESET:
@@ -750,16 +718,24 @@ class PABotBase2Connection:
             message = bytes(self.stream_buffer[:message_size])
             del self.stream_buffer[:message_size]
             _, opcode, request_id = struct.unpack_from("<HBB", message)
-            if opcode in (PABB2_MESSAGE_OPCODE_RET, PABB2_MESSAGE_OPCODE_RET_U32, PABB2_MESSAGE_OPCODE_RET_DATA):
+            if opcode in (
+                PABB2_MESSAGE_OPCODE_RET,
+                PABB2_MESSAGE_OPCODE_RET_U32,
+                PABB2_MESSAGE_OPCODE_RET_DATA,
+                PABB2_MESSAGE_OPCODE_RET_U32_DATA,
+            ):
                 self.responses[request_id] = message
             elif opcode == PABB2_MESSAGE_OPCODE_CQ_COMMAND_FINISHED:
                 continue
 
     def _connect_device(self) -> None:
         self.device_protocol = self._query_u32(PABB2_MESSAGE_OPCODE_PROTOCOL_VERSION)
-        if self.device_protocol < 2026041103:
+        if self.device_protocol != PABB2_MESSAGE_PROTOCOL_VERSION:
             raise PABotBase2Error(f"Incompatible PABotBase2 message protocol: {self.device_protocol}")
         self.device_firmware_version = self._query_u32(PABB2_MESSAGE_OPCODE_FIRMWARE_VERSION)
+        if self.device_firmware_version < PABB2_MIN_FIRMWARE_VERSION:
+            raise PABotBase2Error(f"Incompatible PABotBase2 firmware version: {self.device_firmware_version}")
+        self._set_logging_flag(PABB2_DEVICE_LOGGING_FLAG)
         self.device_id = self._query_u32(PABB2_MESSAGE_OPCODE_DEVICE_IDENTIFIER)
         self.device_name = self._query_data(PABB2_MESSAGE_OPCODE_DEVICE_NAME).decode("utf-8", errors="replace")
         self.supported_controller_modes = self._parse_controller_list(
@@ -794,6 +770,10 @@ class PABotBase2Connection:
         if response_opcode != PABB2_MESSAGE_OPCODE_RET_DATA or response_size < MESSAGE_HEADER_SIZE:
             raise PABotBase2Error(f"Expected data response for opcode 0x{opcode:02x}.")
         return response[MESSAGE_HEADER_SIZE:response_size]
+
+    def _set_logging_flag(self, flag: int) -> None:
+        message = struct.pack("<HBBI", 8, PABB2_MESSAGE_OPCODE_SET_LOGGING_FLAG, 0, flag & 0xFFFFFFFF)
+        self._send_message_no_response(message)
 
     def _set_controller_mode(self, mode: ControllerMode) -> None:
         self._validate_supported_controller_mode(mode)
