@@ -19,6 +19,7 @@ from Commands import UnitCommand
 
 # from Commands import StickCommand
 from Commands.Keys import Direction, Stick, Touchscreen, NEUTRAL, KeyPress
+from Commands.PABotBase2 import controller_mode_is_left_joycon, controller_mode_is_right_joycon
 
 import logging
 from logging import StreamHandler, getLogger, DEBUG, NullHandler
@@ -746,8 +747,8 @@ class ControllerGUI:
             if getattr(ser, "serial_data_format_name", "") == "PABotBase2"
             else ""
         )
-        self.show_left = mode != "Wireless Right Joy-Con"
-        self.show_right = mode != "Wireless Left Joy-Con"
+        self.show_left = not mode or not controller_mode_is_right_joycon(mode)
+        self.show_right = not mode or not controller_mode_is_left_joycon(mode)
         width = 660 if self.show_left and self.show_right else 330
         self.window.geometry("%dx%d%+d%+d" % (width, 360, 250 + root_x, 125 + root_y))
         self.window.resizable(False, False)

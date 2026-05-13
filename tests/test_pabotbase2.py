@@ -35,6 +35,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_CONNECTION_OPCODE_RET_STREAM_DATA,
     PABB2_CONNECTION_OPCODE_RET_VERSION,
     PABB2_CONNECTION_RESET_SESSION_ID,
+    PABB2_MESSAGE_CMD_NS_WIRED_CONTROLLER_STATE,
     PABB2_MESSAGE_CMD_NS1_OEM_CONTROLLER_BUTTONS,
     PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE,
     PABB2_MESSAGE_OPCODE_CONTROLLER_LIST,
@@ -66,6 +67,16 @@ class FakeSerial:
         self.device_seq = 0
         self.device_stream_offset = 0
         self.controller_mode = 0
+        self.supported_controller_modes = [
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER,
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
+            ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
+            ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER,
+            ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER,
+            ControllerMode.NINTENDO_SWITCH_WIRED_LEFT_JOYCON,
+            ControllerMode.NINTENDO_SWITCH_WIRED_RIGHT_JOYCON,
+        ]
+        self.command_messages = []
         self.inject_bad_crc_before_reset_ack = False
         self.reset_ack_uses_reset_seed = False
         self.ignore_no_session_reset = False
@@ -169,7 +180,11 @@ class FakeSerial:
     def _handle_message(self, opcode, request_id, message):
         if opcode == PABB2_MESSAGE_OPCODE_CQ_CANCEL:
             return
+        if opcode == PABB2_MESSAGE_CMD_NS_WIRED_CONTROLLER_STATE:
+            self.command_messages.append(message)
+            return
         if opcode == PABB2_MESSAGE_CMD_NS1_OEM_CONTROLLER_BUTTONS:
+            self.command_messages.append(message)
             return
         if opcode == PABB2_MESSAGE_OPCODE_PROTOCOL_VERSION:
             self._ret_u32(request_id, 2026041105)
@@ -180,7 +195,10 @@ class FakeSerial:
         elif opcode == PABB2_MESSAGE_OPCODE_DEVICE_NAME:
             self._ret_data(request_id, b"Fake PABotBase2")
         elif opcode == PABB2_MESSAGE_OPCODE_CONTROLLER_LIST:
-            self._ret_data(request_id, struct.pack("<I", int(ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER)))
+            self._ret_data(
+                request_id,
+                b"".join(struct.pack("<I", int(mode)) for mode in self.supported_controller_modes),
+            )
         elif opcode == PABB2_MESSAGE_OPCODE_CQ_CAPACITY:
             self._ret_u32(request_id, 8)
         elif opcode == PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE:
@@ -308,6 +326,42 @@ class PABotBase2Tests(unittest.TestCase):
 
                 self.assertEqual(serial.controller_mode, int(mode))
 
+    def test_connect_fails_fast_when_firmware_does_not_support_selected_mode(self):
+        serial = FakeSerial()
+        serial.supported_controller_modes = [ControllerMode.NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER]
+        connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER)
+
+        with self.assertRaisesRegex(PABotBase2Error, "does not support selected controller mode"):
+            connection.connect(timeout=0.25)
+
+    def test_wired_pro_controller_uses_oem_state_message(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER)
+
+        connection.connect(timeout=1.0)
+        connection.send_controller_state(Format())
+
+        self.assertEqual(serial.command_messages[-1][2], PABB2_MESSAGE_CMD_NS1_OEM_CONTROLLER_BUTTONS)
+
+    def test_wired_controller_uses_wired_report_message(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER)
+
+        connection.connect(timeout=1.0)
+        connection.send_controller_state(Format(btn=(1 << 2) | (1 << 7), hat=2, lx=1, ly=2, rx=3, ry=4))
+
+        message = serial.command_messages[-1]
+        self.assertEqual(struct.unpack_from("<H", message)[0], 13)
+        self.assertEqual(message[2], PABB2_MESSAGE_CMD_NS_WIRED_CONTROLLER_STATE)
+        self.assertEqual(struct.unpack_from("<H", message, MESSAGE_HEADER_SIZE)[0], 65535)
+        self.assertEqual(message[MESSAGE_HEADER_SIZE + 2 :], bytes([0x84, 0x00, 0x02, 1, 2, 3, 4]))
+
+    def test_wired_controller_rejects_joycon_sl_sr_buttons(self):
+        connection = PABotBase2Connection(FakeSerial(), ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER)
+
+        with self.assertRaisesRegex(PABotBase2Error, "LEFT_SL"):
+            connection._build_wired_controller_state(Format(btn=int(Button.LEFT_SL), hat=8), 100)
+
     def test_sender_passes_selected_pabotbase2_controller_mode(self):
         class FalseVar:
             def get(self):
@@ -323,26 +377,32 @@ class PABotBase2Tests(unittest.TestCase):
         self.assertEqual(sender.ser.controller_mode, int(ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON))
 
     def test_joycon_modes_fail_fast_on_unsupported_inputs(self):
-        left = PABotBase2Connection(
-            FakeSerial(),
+        left_modes = (
             ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
+            ControllerMode.NINTENDO_SWITCH_WIRED_LEFT_JOYCON,
         )
-        right = PABotBase2Connection(
-            FakeSerial(),
+        right_modes = (
             ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
+            ControllerMode.NINTENDO_SWITCH_WIRED_RIGHT_JOYCON,
         )
 
-        left._build_oem_controller_buttons(Format(btn=1 << 4, hat=0, lx=255, ly=128, rx=128, ry=128), 100)
-        right._build_oem_controller_buttons(Format(btn=1 << 2, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
+        for mode in left_modes:
+            with self.subTest(mode=mode):
+                left = PABotBase2Connection(FakeSerial(), mode)
+                left._build_oem_controller_buttons(Format(btn=1 << 4, hat=0, lx=255, ly=128, rx=128, ry=128), 100)
+                with self.assertRaisesRegex(PABotBase2Error, "Y"):
+                    left._build_oem_controller_buttons(Format(btn=1 << 0, hat=8, lx=128, ly=128, rx=128, ry=128), 100)
+                with self.assertRaisesRegex(PABotBase2Error, "Right stick"):
+                    left._build_oem_controller_buttons(Format(btn=0, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
 
-        with self.assertRaisesRegex(PABotBase2Error, "Y"):
-            left._build_oem_controller_buttons(Format(btn=1 << 0, hat=8, lx=128, ly=128, rx=128, ry=128), 100)
-        with self.assertRaisesRegex(PABotBase2Error, "Right stick"):
-            left._build_oem_controller_buttons(Format(btn=0, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
-        with self.assertRaisesRegex(PABotBase2Error, "D-pad/Hat"):
-            right._build_oem_controller_buttons(Format(btn=0, hat=0, lx=128, ly=128, rx=128, ry=128), 100)
-        with self.assertRaisesRegex(PABotBase2Error, "Left stick"):
-            right._build_oem_controller_buttons(Format(btn=0, hat=8, lx=255, ly=128, rx=128, ry=128), 100)
+        for mode in right_modes:
+            with self.subTest(mode=mode):
+                right = PABotBase2Connection(FakeSerial(), mode)
+                right._build_oem_controller_buttons(Format(btn=1 << 2, hat=8, lx=128, ly=128, rx=128, ry=0), 100)
+                with self.assertRaisesRegex(PABotBase2Error, "D-pad/Hat"):
+                    right._build_oem_controller_buttons(Format(btn=0, hat=0, lx=128, ly=128, rx=128, ry=128), 100)
+                with self.assertRaisesRegex(PABotBase2Error, "Left stick"):
+                    right._build_oem_controller_buttons(Format(btn=0, hat=8, lx=255, ly=128, rx=128, ry=128), 100)
 
     def test_joycon_sl_sr_buttons_encode_like_pokemon_automation(self):
         button3, _, button5 = PABotBase2Connection._encode_buttons(

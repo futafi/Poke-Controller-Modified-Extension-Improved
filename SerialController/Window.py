@@ -1424,8 +1424,14 @@ class PokeControllerApp:
         if not hasattr(self, "softcon_left_frame"):
             return
         mode = self.pabotbase2_controller_mode.get() if self.serial_data_format_name.get() == "PABotBase2" else ""
-        self._set_softcon_frame_enabled(self.softcon_left_frame, mode != "Wireless Right Joy-Con")
-        self._set_softcon_frame_enabled(self.softcon_right_frame, mode != "Wireless Left Joy-Con")
+        self._set_softcon_frame_enabled(
+            self.softcon_left_frame,
+            not mode or not Sender.controller_mode_is_right_joycon(mode),
+        )
+        self._set_softcon_frame_enabled(
+            self.softcon_right_frame,
+            not mode or not Sender.controller_mode_is_left_joycon(mode),
+        )
 
     def _set_softcon_frame_enabled(self, frame, enabled):
         state = "normal" if enabled else "disabled"

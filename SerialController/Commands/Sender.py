@@ -16,6 +16,8 @@ from Commands.PABotBase2 import (
     PABotBase2Connection,
     PABotBase2Error,
     controller_mode_from_name,
+    controller_mode_is_left_joycon,
+    controller_mode_is_right_joycon,
 )
 
 if TYPE_CHECKING:
