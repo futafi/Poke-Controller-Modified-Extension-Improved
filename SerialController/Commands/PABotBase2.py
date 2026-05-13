@@ -19,6 +19,7 @@ class PABotBase2Error(RuntimeError):
 class ControllerMode(IntEnum):
     NONE = 0x0000
     NINTENDO_SWITCH_WIRED_CONTROLLER = 0x1000
+    NINTENDO_SWITCH2_WIRED_CONTROLLER = 0x1010
     NINTENDO_SWITCH_WIRELESS_PRO_CONTROLLER = 0x1180
     NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON = 0x1181
     NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON = 0x1182
@@ -32,6 +33,7 @@ PABOTBASE2_CONTROLLER_MODE_NAMES = (
     "Wireless Left Joy-Con",
     "Wireless Right Joy-Con",
     "Wired Controller",
+    "Switch 2 Wired Controller",
     "Wired Pro Controller",
     "Wired Left Joy-Con",
     "Wired Right Joy-Con",
@@ -42,6 +44,7 @@ PABOTBASE2_CONTROLLER_MODE_BY_NAME = {
     "Wireless Left Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
     "Wireless Right Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
     "Wired Controller": ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER,
+    "Switch 2 Wired Controller": ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER,
     "Wired Pro Controller": ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER,
     "Wired Left Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRED_LEFT_JOYCON,
     "Wired Right Joy-Con": ControllerMode.NINTENDO_SWITCH_WIRED_RIGHT_JOYCON,
@@ -61,6 +64,12 @@ PABOTBASE2_RIGHT_JOYCON_MODES = frozenset(
     {
         ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
         ControllerMode.NINTENDO_SWITCH_WIRED_RIGHT_JOYCON,
+    }
+)
+PABOTBASE2_WIRED_CONTROLLER_MODES = frozenset(
+    {
+        ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER,
+        ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER,
     }
 )
 PABOTBASE2_OEM_CONTROLLER_MODES = frozenset(
@@ -132,6 +141,7 @@ PABB2_MESSAGE_OPCODE_CONTROLLER_LIST = 0x24
 PABB2_MESSAGE_OPCODE_CQ_CAPACITY = 0x28
 PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE = 0x30
 PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE = 0x31
+PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER = 0x32
 PABB2_MESSAGE_OPCODE_REQUEST_STATUS = 0x35
 PABB2_MESSAGE_OPCODE_CQ_CANCEL = 0x41
 PABB2_MESSAGE_OPCODE_CQ_COMMAND_FINISHED = 0x43
@@ -739,6 +749,21 @@ class PABotBase2Connection:
         return response[MESSAGE_HEADER_SIZE:response_size]
 
     def _set_controller_mode(self, mode: ControllerMode) -> None:
+        self._validate_supported_controller_mode(mode)
+        current = self._query_u32(PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE)
+        if current == int(mode):
+            return
+        self._send_controller_mode_request(PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE, mode, timeout=2.0)
+
+    def reset_to_controller(self, mode: ControllerMode | int | None = None) -> None:
+        if not self.connected:
+            raise PABotBase2Error("PABotBase2 connection is not open.")
+        mode = self.controller_mode if mode is None else ControllerMode(mode)
+        self._validate_supported_controller_mode(mode)
+        self._send_controller_mode_request(PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER, mode, timeout=2.0)
+        self.controller_mode = mode
+
+    def _validate_supported_controller_mode(self, mode: ControllerMode) -> None:
         if self.supported_controller_modes and mode not in self.supported_controller_modes:
             supported = ", ".join(
                 controller_mode_name(supported_mode)
@@ -751,11 +776,10 @@ class PABotBase2Connection:
                 "PABotBase2 firmware does not support selected controller mode: "
                 f"{controller_mode_name(mode)}. Supported: {supported}"
             )
-        current = self._query_u32(PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE)
-        if current == int(mode):
-            return
-        message = struct.pack("<HBBI", 8, PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE, 0, int(mode))
-        self._send_message_with_response(message, timeout=2.0)
+
+    def _send_controller_mode_request(self, opcode: int, mode: ControllerMode, timeout: float) -> None:
+        message = struct.pack("<HBBI", 8, opcode, 0, int(mode))
+        self._send_message_with_response(message, timeout=timeout)
 
     def _send_message_with_response(self, message: bytes, timeout: float = 2.0) -> bytes:
         message = bytearray(message)
@@ -781,7 +805,7 @@ class PABotBase2Connection:
         self._send_stream(bytes(message), timeout=1.0)
 
     def _build_controller_state(self, send_format: Any, milliseconds: int) -> bytes:
-        if self.controller_mode == ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER:
+        if self.controller_mode in PABOTBASE2_WIRED_CONTROLLER_MODES:
             return self._build_wired_controller_state(send_format, milliseconds)
         if self.controller_mode in PABOTBASE2_OEM_CONTROLLER_MODES:
             return self._build_oem_controller_buttons(send_format, milliseconds)
@@ -796,11 +820,14 @@ class PABotBase2Connection:
         rx = int(fmt["rx"])
         ry = int(fmt["ry"])
         self._validate_wired_controller_state(buttons, hat)
+        dpad_byte = hat & 0x0F
+        if self.controller_mode == ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER and buttons & (1 << 24):
+            dpad_byte |= 0x80
         report = bytes(
             [
                 buttons & 0xFF,
                 (buttons >> 8) & 0xFF,
-                hat & 0x0F,
+                dpad_byte,
                 self._clamp_u8(lx),
                 self._clamp_u8(ly),
                 self._clamp_u8(rx),
@@ -886,7 +913,10 @@ class PABotBase2Connection:
                 23: "RIGHT_SR",
             },
         )
-        unsupported_mask = buttons & ~0x3FFF
+        supported_mask = 0x3FFF
+        if self.controller_mode == ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER:
+            supported_mask = 0x0100FFFF
+        unsupported_mask = buttons & ~supported_mask
         if unsupported_mask:
             raise PABotBase2Error(
                 f"Unsupported button bits for Wired Controller mode: 0x{unsupported_mask:x}"

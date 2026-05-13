@@ -278,6 +278,9 @@ class PokeControllerApp:
         )
         self.pabotbase2_controller_mode_cb.grid(column="1", padx="5", pady="5", row="1", sticky="ew")
         self.pabotbase2_controller_mode_cb.bind("<<ComboboxSelected>>", self.set_pabotbase2_controller_mode)
+        self.pabotbase2_reset_controller_button = ttk.Button(self.serial_data_lf)
+        self.pabotbase2_reset_controller_button.configure(text="Reset Ctrl", command=self.reset_pabotbase2_controller)
+        self.pabotbase2_reset_controller_button.grid(column="2", padx="5", pady="5", row="1", sticky="ew")
         self.serial_data_lf.configure(height="200", text="Data", width="420")
         self.serial_data_lf.grid(column="0", padx="5", row="1", sticky="ew")
         # self.serial_f.configure(height='200', width='200')    # removed
@@ -1418,7 +1421,19 @@ class PokeControllerApp:
     def _update_pabotbase2_controller_mode_state(self):
         state = "readonly" if self.serial_data_format_name.get() == "PABotBase2" else "disabled"
         self.pabotbase2_controller_mode_cb.configure(state=state)
+        self.pabotbase2_reset_controller_button.configure(
+            state="normal" if self.serial_data_format_name.get() == "PABotBase2" else "disabled"
+        )
         self._update_softcon_controller_mode()
+
+    def reset_pabotbase2_controller(self):
+        try:
+            self.ser.set_pabotbase2_controller_mode(self.pabotbase2_controller_mode.get())
+            self.ser.reset_pabotbase2_controller()
+            print("PABotBase2 controller reset: " + self.pabotbase2_controller_mode.get())
+        except Exception as e:
+            print(e)
+            self._logger.error(e)
 
     def _update_softcon_controller_mode(self):
         if not hasattr(self, "softcon_left_frame"):

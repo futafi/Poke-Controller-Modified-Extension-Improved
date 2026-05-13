@@ -62,10 +62,13 @@ class Sender:
             "Button.RCLICK",
             "Button.HOME",
             "Button.CAPTURE",
+            "Button.GR",
+            "Button.GL",
             "Button.LEFT_SL",
             "Button.LEFT_SR",
             "Button.RIGHT_SL",
             "Button.RIGHT_SR",
+            "Button.C",
         ]
         self.Hat = ["TOP", "TOP_RIGHT", "RIGHT", "BTM_RIGHT", "BTM", "BTM_LEFT", "LEFT", "TOP_LEFT", "CENTER"]
 
@@ -231,6 +234,13 @@ class Sender:
         self.before = dict(send_format.format)
         if self.is_show_serial.get():
             print("PABotBase2 state:", self.before)
+
+    def reset_pabotbase2_controller(self):
+        if not self.is_pabotbase2():
+            raise PABotBase2Error("reset_pabotbase2_controller() can only be used with PABotBase2.")
+        if self.pabotbase2 is None:
+            raise PABotBase2Error("PABotBase2 connection is not open.")
+        self.pabotbase2.reset_to_controller(controller_mode_from_name(self.pabotbase2_controller_mode_name))
 
     def _write_pabotbase2_row(self, row: str, is_show: bool = False):
         if self.pabotbase2 is None:

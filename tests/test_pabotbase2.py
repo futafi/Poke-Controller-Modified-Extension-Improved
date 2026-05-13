@@ -46,6 +46,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_MESSAGE_OPCODE_FIRMWARE_VERSION,
     PABB2_MESSAGE_OPCODE_PROTOCOL_VERSION,
     PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE,
+    PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER,
     PABB2_MESSAGE_OPCODE_RET,
     PABB2_MESSAGE_OPCODE_RET_DATA,
     PABB2_MESSAGE_OPCODE_RET_U32,
@@ -72,11 +73,13 @@ class FakeSerial:
             ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON,
             ControllerMode.NINTENDO_SWITCH_WIRELESS_RIGHT_JOYCON,
             ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER,
+            ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER,
             ControllerMode.NINTENDO_SWITCH_WIRED_PRO_CONTROLLER,
             ControllerMode.NINTENDO_SWITCH_WIRED_LEFT_JOYCON,
             ControllerMode.NINTENDO_SWITCH_WIRED_RIGHT_JOYCON,
         ]
         self.command_messages = []
+        self.mode_requests = []
         self.inject_bad_crc_before_reset_ack = False
         self.reset_ack_uses_reset_seed = False
         self.ignore_no_session_reset = False
@@ -203,8 +206,9 @@ class FakeSerial:
             self._ret_u32(request_id, 8)
         elif opcode == PABB2_MESSAGE_OPCODE_READ_CONTROLLER_MODE:
             self._ret_u32(request_id, self.controller_mode)
-        elif opcode == PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE:
+        elif opcode in (PABB2_MESSAGE_OPCODE_CHANGE_CONTROLLER_MODE, PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER):
             self.controller_mode = struct.unpack_from("<I", message, MESSAGE_HEADER_SIZE)[0]
+            self.mode_requests.append((opcode, self.controller_mode))
             self._send_stream_message(struct.pack("<HBB", MESSAGE_HEADER_SIZE, PABB2_MESSAGE_OPCODE_RET, request_id))
 
     def _ret_u32(self, request_id, value):
@@ -356,11 +360,42 @@ class PABotBase2Tests(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<H", message, MESSAGE_HEADER_SIZE)[0], 65535)
         self.assertEqual(message[MESSAGE_HEADER_SIZE + 2 :], bytes([0x84, 0x00, 0x02, 1, 2, 3, 4]))
 
+    def test_switch2_wired_controller_uses_wired_report_with_extra_buttons(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER)
+
+        connection.connect(timeout=1.0)
+        connection.send_controller_state(
+            Format(btn=(1 << 14) | (1 << 15) | (1 << 24), hat=8, lx=128, ly=128, rx=128, ry=128)
+        )
+
+        message = serial.command_messages[-1]
+        self.assertEqual(message[2], PABB2_MESSAGE_CMD_NS_WIRED_CONTROLLER_STATE)
+        self.assertEqual(message[MESSAGE_HEADER_SIZE + 2 :], bytes([0x00, 0xC0, 0x88, 128, 128, 128, 128]))
+
     def test_wired_controller_rejects_joycon_sl_sr_buttons(self):
         connection = PABotBase2Connection(FakeSerial(), ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER)
 
         with self.assertRaisesRegex(PABotBase2Error, "LEFT_SL"):
             connection._build_wired_controller_state(Format(btn=int(Button.LEFT_SL), hat=8), 100)
+
+    def test_switch1_wired_controller_rejects_switch2_buttons(self):
+        connection = PABotBase2Connection(FakeSerial(), ControllerMode.NINTENDO_SWITCH_WIRED_CONTROLLER)
+
+        with self.assertRaisesRegex(PABotBase2Error, "Unsupported button bits"):
+            connection._build_wired_controller_state(Format(btn=int(Button.C), hat=8), 100)
+
+    def test_reset_to_controller_sends_reset_opcode(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial, ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER)
+
+        connection.connect(timeout=1.0)
+        connection.reset_to_controller()
+
+        self.assertEqual(
+            serial.mode_requests[-1],
+            (PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER, int(ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER)),
+        )
 
     def test_sender_passes_selected_pabotbase2_controller_mode(self):
         class FalseVar:
@@ -375,6 +410,24 @@ class PABotBase2Tests(unittest.TestCase):
         sender._post_open_serial()
 
         self.assertEqual(sender.ser.controller_mode, int(ControllerMode.NINTENDO_SWITCH_WIRELESS_LEFT_JOYCON))
+
+    def test_sender_resets_selected_pabotbase2_controller_mode(self):
+        class FalseVar:
+            def get(self):
+                return False
+
+        sender = Sender(FalseVar())
+        sender.set_serial_data_format("PABotBase2")
+        sender.set_pabotbase2_controller_mode("Switch 2 Wired Controller")
+        sender.ser = FakeSerial()
+
+        sender._post_open_serial()
+        sender.reset_pabotbase2_controller()
+
+        self.assertEqual(
+            sender.ser.mode_requests[-1],
+            (PABB2_MESSAGE_OPCODE_RESET_TO_CONTROLLER, int(ControllerMode.NINTENDO_SWITCH2_WIRED_CONTROLLER)),
+        )
 
     def test_joycon_modes_fail_fast_on_unsupported_inputs(self):
         left_modes = (

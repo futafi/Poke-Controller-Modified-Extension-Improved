@@ -29,10 +29,13 @@ class Button(IntFlag):
     RCLICK = 1 << 11
     HOME = 1 << 12
     CAPTURE = 1 << 13
+    GR = 1 << 14
+    GL = 1 << 15
     LEFT_SL = 1 << 20
     LEFT_SR = 1 << 21
     RIGHT_SL = 1 << 22
     RIGHT_SR = 1 << 23
+    C = 1 << 24
     SELECT = MINUS  # for 3DS, 9
     START = PLUS  # for 3DS, 10
     POWER = LCLICK  # for 3DS, 11
@@ -55,10 +58,13 @@ conversion_default_button = {
     Button.RCLICK: Button.RCLICK,
     Button.HOME: Button.HOME,
     Button.CAPTURE: Button.CAPTURE,
+    Button.GR: Button.GR,
+    Button.GL: Button.GL,
     Button.LEFT_SL: Button.LEFT_SL,
     Button.LEFT_SR: Button.LEFT_SR,
     Button.RIGHT_SL: Button.RIGHT_SL,
     Button.RIGHT_SR: Button.RIGHT_SR,
+    Button.C: Button.C,
     Button.SELECT: Button.SELECT,
     Button.START: Button.START,
     Button.POWER: Button.POWER,
@@ -83,10 +89,13 @@ conversion_3ds_controller_button = {
     Button.ZL: 0,
     Button.ZR: 0,
     Button.CAPTURE: 0,
+    Button.GR: 0,
+    Button.GL: 0,
     Button.LEFT_SL: 0,
     Button.LEFT_SR: 0,
     Button.RIGHT_SL: 0,
     Button.RIGHT_SR: 0,
+    Button.C: 0,
     Button.WIRELESS: 0,
 }
 

@@ -157,6 +157,33 @@ class CAPTURE(UnitCommand):
         self.press(Button.CAPTURE)
 
 
+class GR(UnitCommand):
+    def __init__(self):
+        super().__init__()
+
+    def start(self, ser):
+        super().start(ser)
+        self.press(Button.GR)
+
+
+class GL(UnitCommand):
+    def __init__(self):
+        super().__init__()
+
+    def start(self, ser):
+        super().start(ser)
+        self.press(Button.GL)
+
+
+class C(UnitCommand):
+    def __init__(self):
+        super().__init__()
+
+    def start(self, ser):
+        super().start(ser)
+        self.press(Button.C)
+
+
 class LEFT_SL(UnitCommand):
     def __init__(self):
         super().__init__()
