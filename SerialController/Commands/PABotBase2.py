@@ -599,7 +599,11 @@ class PABotBase2Connection:
     def _process_packet(self, packet: bytes) -> None:
         expected = struct.unpack_from("<I", packet, len(packet) - CRC_SIZE)[0]
         actual = pabb_crc32(self.session_id, packet[:-CRC_SIZE])
-        if expected != actual and not self._matches_reset_handshake_crc(expected, packet):
+        if (
+            expected != actual
+            and not self._matches_reset_handshake_crc(expected, packet)
+            and not self._matches_legacy_retransmit_crc(expected, packet)
+        ):
             if self._matches_stale_reset_session_info_crc(expected, packet):
                 return
             self.bad_crc_packets += 1
@@ -649,6 +653,13 @@ class PABotBase2Connection:
             return
         if opcode == PABB2_CONNECTION_OPCODE_UNKNOWN_OPCODE:
             raise PABotBase2Error(f"PABotBase2 device reported unknown opcode: {packet[PACKET_HEADER_SIZE]}")
+
+    def _matches_legacy_retransmit_crc(self, expected: int, packet: bytes) -> bool:
+        if not (packet[3] & PABB2_CONNECTION_RETRANSMIT_FLAG):
+            return False
+        original_body = bytearray(packet[:-CRC_SIZE])
+        original_body[3] &= PABB2_CONNECTION_OPCODE_MASK
+        return expected == pabb_crc32(self.session_id, bytes(original_body))
 
     def _matches_reset_handshake_crc(self, expected: int, packet: bytes) -> bool:
         if packet[3] & PABB2_CONNECTION_OPCODE_MASK != PABB2_CONNECTION_OPCODE_RET_RESET:

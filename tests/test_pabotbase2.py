@@ -29,6 +29,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA,
     PABB2_CONNECTION_OPCODE_ASK_VERSION,
     PABB2_CONNECTION_OPCODE_INFO_STREAM_NOT_READY,
+    PABB2_CONNECTION_RETRANSMIT_FLAG,
     PABB2_CONNECTION_OPCODE_RET_BUFFER_SLOTS,
     PABB2_CONNECTION_OPCODE_RET_PACKET_SIZE,
     PABB2_CONNECTION_OPCODE_RET_RESET,
@@ -41,6 +42,7 @@ from Commands.PABotBase2 import (  # noqa: E402
     PABB2_MESSAGE_OPCODE_CONTROLLER_LIST,
     PABB2_MESSAGE_OPCODE_CQ_CANCEL,
     PABB2_MESSAGE_OPCODE_CQ_CAPACITY,
+    PABB2_MESSAGE_OPCODE_CQ_COMMAND_FINISHED,
     PABB2_MESSAGE_OPCODE_DEVICE_IDENTIFIER,
     PABB2_MESSAGE_OPCODE_DEVICE_NAME,
     PABB2_MESSAGE_OPCODE_FIRMWARE_VERSION,
@@ -319,6 +321,34 @@ class PABotBase2Tests(unittest.TestCase):
         connection._process_packet(packet)
 
         self.assertEqual(connection.bad_crc_packets, 0)
+
+    def test_accepts_legacy_retransmit_crc_without_recomputed_flag(self):
+        serial = FakeSerial()
+        connection = PABotBase2Connection(serial)
+        connection.session_id = 0x12345678
+        message = struct.pack("<HBB", MESSAGE_HEADER_SIZE, PABB2_MESSAGE_OPCODE_CQ_COMMAND_FINISHED, 0)
+        original_body = struct.pack(
+            "<BBBBH",
+            PABB2_CONNECTION_MAGIC_NUMBER,
+            58,
+            PACKET_DATA_HEADER_SIZE + len(message) + CRC_SIZE,
+            PABB2_CONNECTION_OPCODE_ASK_STREAM_DATA,
+            0,
+        ) + message
+        retransmit_body = bytearray(original_body)
+        retransmit_body[3] |= PABB2_CONNECTION_RETRANSMIT_FLAG
+        packet = bytes(retransmit_body) + struct.pack("<I", pabb_crc32(connection.session_id, original_body))
+
+        connection._process_packet(packet)
+
+        self.assertEqual(connection.bad_crc_packets, 0)
+        self.assertTrue(
+            any(
+                len(packet) >= PACKET_HEADER_SIZE
+                and packet[3] & 0x7F == PABB2_CONNECTION_OPCODE_RET_STREAM_DATA
+                for packet in serial.written
+            )
+        )
 
     def test_connect_uses_selected_controller_mode(self):
         for mode_name, mode in PABOTBASE2_CONTROLLER_MODE_BY_NAME.items():
